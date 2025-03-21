@@ -14,15 +14,15 @@ class Program
     static void Main(string[] args)
     {
         ServerUDP sUDP = new ServerUDP();
-        sUDP.start();
+        sUDP.start(); // Start de server
     }
 }
 
 class ServerUDP
 {
-    private Socket serverSocket;
-    private EndPoint remoteEndpoint;
-    private const int port = 11000;
+    private Socket serverSocket; // De UDP socket waarop we gaan luisteren
+    private EndPoint remoteEndpoint; // De client die ons iets stuurt
+    private const int port = 11000; // De poort waarop de server draait
 
     //TODO: implement all necessary logic to create sockets and handle incoming messages
     // Do not put all the logic into one method. Create multiple methods to handle different tasks.
@@ -30,11 +30,13 @@ class ServerUDP
     {
         System.Console.WriteLine("Server word opgestart...");
 
-        InitializeSocket();
+        InitializeSocket(); // Socket opzetten en binden
         System.Console.WriteLine("Server luistert op poort " + port);
 
-        // 1 keer Hello afhandelen (je gaat dit later in een loop zetten)
+        // Ontvang eerste bericht (veracht: Hello)
         Message message = ReceiveMessage();
+
+        // Als het een Hello-bericht is, reageren met Welcome
         if (message.Type == MessageType.Hello)
             HandleHello(message);
         else
@@ -45,22 +47,28 @@ class ServerUDP
 
     private void InitializeSocket()
     {
+        // Setup de socket en koppel deze aan alle IP-adressen op poort 11000
         serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         IPEndPoint localEndPoint = new IPEndPoint(IPAddress.Any, port);
         serverSocket.Bind(localEndPoint);
 
-        remoteEndpoint = new IPEndPoint(IPAddress.Any, 0); // Vult zichzelf in bij ReceiveForm
+        // De remote endpoint word automatisch gevuld zodra een bericht wordt ontvangen
+        remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
     }
 
     private Message ReceiveMessage()
     {
+        // Buffer voor inkomende berichten
         byte[] buffer = new byte[4096];
+
+        // Ontvang bericht
         int received = serverSocket.ReceiveFrom(buffer, ref remoteEndpoint);
+
+        // Decodeer de datat naar een JSON-string
         string jsonMessage = Encoding.UTF8.GetString(buffer, 0, received);
+        System.Console.WriteLine("Bericht ontvangen:\n" + jsonMessage);
 
-        System.Console.WriteLine("Bericht ontvangen: ");
-        System.Console.WriteLine(jsonMessage);
-
+        // Parse de JSON naar een Message-object
         Message? message = JsonSerializer.Deserialize<Message>(jsonMessage);
         return message ?? throw new Exception("Kon bericht niet parsen.");
     }
@@ -69,11 +77,13 @@ class ServerUDP
     {
         System.Console.WriteLine("Hello ontvangen met MsgId " + message.MsgId);
 
+        // Stuur een Welcome met een nieuwe ID terug
         SendWelcome(message.MsgId + 1);
     }
 
     private void SendWelcome(int replyMsgId)
     {
+        // Maak Welcome-message
         Message welcome = new Message
         {
             MsgId = replyMsgId,
@@ -81,6 +91,7 @@ class ServerUDP
             Content = "Welkom van de server!"
         };
 
+        // Zet om naar JSON en verstuur naar de client
         string json = JsonSerializer.Serialize(welcome);
         byte[] data = Encoding.UTF8.GetBytes(json);
         serverSocket.SendTo(data, remoteEndpoint);
