@@ -5,7 +5,6 @@ namespace MessageNS
 
     public class Message
     {
-        public int MsgId { get; set; }
         public MessageType Type { get; set; }
         public string? Content { get; set; }
     }
