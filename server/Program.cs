@@ -21,57 +21,88 @@ class Program
 
 class ServerUDP
 {
-    private Socket serverSocket; // De UDP socket waarop we gaan luisteren
-    private EndPoint remoteEndpoint; // De client die ons iets stuurt
-    private const int port = 11000; // De poort waarop de server draait
+    // De socket waarmee de UDP-berichten verzenden en ontvangen
+    private Socket serverSocket;
 
-    //TODO: implement all necessary logic to create sockets and handle incoming messages
-    // Do not put all the logic into one method. Create multiple methods to handle different tasks.
+    // Het IP + poort van de client die we bedienen
+    private EndPoint remoteEndpoint;
+
+    // Server luistert op poort 11000
+    private const int port = 11000;
+
+    // Teller voor de ontvangen Acks
+    private int ackCounter = 0;
+
+    // We wachten voor ontvangen van 4 Ack-berichten
+    private const int expectedAcks = 4;
+
+    // Hoofdloop van server
     public void start()
     {
         System.Console.WriteLine("Server word opgestart...");
-
         InitializeSocket(); // Socket opzetten en binden
         System.Console.WriteLine("Server luistert op poort " + port);
 
-        // Ontvang eerste bericht (veracht: Hello)
-        Message message = ReceiveMessage();
+        while (true)
+        {
+            try
+            {
+                // Ontvang binnendkomend bericht
+                Message message = ReceiveMessage();
 
-        // Als het een Hello-bericht is, reageren met Welcome
-        if (message.Type == MessageType.Hello)
-            HandleHello(message);
-        else if(message.Type == MessageType.DNSLookup)
-            HandleDNSLookup(message);
-        else
-            System.Console.WriteLine("Verwachtte Hello, maar kreeg iets anders: " + message.Type);
+                // Genegeerd (bijvoorbeeld een eigen bericht)
+                if (message.MsgId == -1)
+                    continue;
 
-        System.Console.WriteLine("Server stopt (alleen voor de test).");
+                // Verwerk op basis van MessageType
+                if (message.Type == MessageType.Hello)
+                    HandleHello(message);
+
+                else if(message.Type == MessageType.DNSLookup)
+                    HandleDNSLookup(message);
+
+                else if (message.Type == MessageType.Ack)
+                    HandleAck(message);
+
+                else
+                    System.Console.WriteLine("Verwachtte Hello, maar kreeg iets anders: " + message.Type);       
+            }
+            catch (System.Exception e)
+            {
+                System.Console.WriteLine("Fout tijdens verwerking: " + e.Message);
+            }
+        }
     }
 
     private void InitializeSocket()
     {
-        // Setup de socket en koppel deze aan alle IP-adressen op poort 11000
+        // Setup: nieuwe UDP socket, bind op poort 11000
         serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         IPEndPoint localEndPoint = new IPEndPoint(IPAddress.Any, port);
         serverSocket.Bind(localEndPoint);
 
-        // De remote endpoint word automatisch gevuld zodra een bericht wordt ontvangen
+        // Placeholder voor remote client
         remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
     }
 
     private Message ReceiveMessage()
     {
-        // Buffer voor inkomende berichten
         byte[] buffer = new byte[4096];
-
-        // Ontvang bericht
         int received = serverSocket.ReceiveFrom(buffer, ref remoteEndpoint);
 
-        // Decodeer de datat naar een JSON-string
-        string jsonMessage = Encoding.UTF8.GetString(buffer, 0, received);
-        System.Console.WriteLine("Bericht ontvangen:\n" + jsonMessage);
+        // Filter: voorkom dat de server zijn eigen bericht opvangt
+        if (remoteEndpoint is IPEndPoint remoteIp &&
+            remoteIp.Address.Equals(IPAddress.Loopback) &&
+            remoteIp.Port == ((IPEndPoint)serverSocket.LocalEndPoint!).Port)
+        {
+            Console.WriteLine("Eigen bericht genegeerd.");
+            return new Message { MsgId = -1, Type = MessageType.Error, Content = "Echo ignored" };
+        }
 
-        // Parse de JSON naar een Message-object
+        // Verwerk binnengekomen bericht
+        string jsonMessage = Encoding.UTF8.GetString(buffer, 0, received);
+        Console.WriteLine("Bericht:\n" + jsonMessage);
+
         Message? message = JsonSerializer.Deserialize<Message>(jsonMessage);
         return message ?? throw new Exception("Kon bericht niet parsen.");
     }
@@ -108,9 +139,10 @@ class ServerUDP
 
         try
         {
-            // Probeer de content te interpreteren als JSON-object (Type + Name)
+            // Parse content als DNSRecord (Type + Name)
             var lookupRequest = JsonSerializer.Deserialize<DNSRecord>(message.Content.ToString() ?? "");
 
+            // Validate: incomplete lookup?
             if (lookupRequest == null || string.IsNullOrEmpty(lookupRequest.Type) || string.IsNullOrEmpty(lookupRequest.Name))
             {
                 SendError(message.MsgId, "Ongeldige lookup content.");
@@ -141,11 +173,12 @@ class ServerUDP
 
             if (match != null)
             {
+                // Record gevonden: stuur DNSLookupReply
                 Message reply = new Message
                 {
                     MsgId = message.MsgId,
                     Type = MessageType.DNSLookupReply,
-                    Content = match
+                    Content = JsonSerializer.Serialize(match)
                 };
 
                 string replyJson = JsonSerializer.Serialize(reply);
@@ -155,6 +188,7 @@ class ServerUDP
             }
             else
             {
+                // Geen match
                 SendError(message.MsgId, "Geen DNS-record gevonden voor " + lookupRequest.Name);
             }
         }
@@ -179,26 +213,32 @@ class ServerUDP
         System.Console.WriteLine("Error verzenden:" + errorMessage);
     }
 
-    //TODO: create all needed objects for your sockets 
+    public void HandleAck(Message message)
+    {
+        System.Console.WriteLine("Ack ontvangen voor MsgId: " + message.Content);
+        ackCounter++;
 
-    //TODO: keep receiving messages from clients
-    // you can call a dedicated method to handle each received type of messages
+        // Als alle 4 Ack's binnen zijn -> stuur end
+        if (ackCounter >= expectedAcks)
+        {
+            SendEnd();
+            ackCounter = 0; // Reset voor de volgende client
+        }
+    }
 
-    //TODO: [Receive Hello]
+    private void SendEnd()
+    {
+        Message endMessage = new Message
+        {
+            MsgId = 9999,
+            Type = MessageType.End,
+            Content = "Alle lookups afgehandeld"
+        };
 
-    //TODO: [Send Welcome]
+        string json = JsonSerializer.Serialize(endMessage);
+        byte[] data = Encoding.UTF8.GetBytes(json);
+        serverSocket.SendTo(data, remoteEndpoint);
 
-    //TODO: [Receive RequestData]
-
-    //TODO: [Send Data]
-
-    //TODO: [Implement your slow-start algorithm considering the threshold] 
-
-    //TODO: [End sending data to client]
-
-    //TODO: [Handle Errors]
-
-    //TODO: create all needed methods to handle incoming messages
-
-
+        System.Console.WriteLine("End verzonden naar client");
+    }
 }
