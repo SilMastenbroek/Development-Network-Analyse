@@ -35,10 +35,10 @@ class ServerUDP
 
         // 1 keer Hello afhandelen (je gaat dit later in een loop zetten)
         Message message = ReceiveMessage();
-        if (message.MsgType == MessageType.Hello)
+        if (message.Type == MessageType.Hello)
             HandleHello(message);
         else
-            System.Console.WriteLine("Verwachtte Hello, maar kreeg iets anders: " + message.MsgType);
+            System.Console.WriteLine("Verwachtte Hello, maar kreeg iets anders: " + message.Type);
 
         System.Console.WriteLine("Server stopt (alleen voor de test).");
     }
@@ -77,7 +77,7 @@ class ServerUDP
         Message welcome = new Message
         {
             MsgId = replyMsgId,
-            MsgType = MessageType.Welcome,
+            Type = MessageType.Welcome,
             Content = "Welkom van de server!"
         };
 
