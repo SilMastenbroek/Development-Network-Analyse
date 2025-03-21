@@ -1,0 +1,16 @@
+[
+    {
+      "Type": "A",
+      "Name": "www.example.com",
+      "Value": "192.168.1.1",
+      "TTL": 3600
+    },
+    {
+      "Type": "MX",
+      "Name": "mail.example.com",
+      "Value": "mail.mailserver.com",
+      "TTL": 3600,
+      "Priority": 10
+    }
+  ]
+  

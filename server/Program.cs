@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using MessageNS;
 
 
@@ -39,6 +40,8 @@ class ServerUDP
         // Als het een Hello-bericht is, reageren met Welcome
         if (message.Type == MessageType.Hello)
             HandleHello(message);
+        else if(message.Type == MessageType.DNSLookup)
+            HandleDNSLookup(message);
         else
             System.Console.WriteLine("Verwachtte Hello, maar kreeg iets anders: " + message.Type);
 
@@ -97,6 +100,83 @@ class ServerUDP
         serverSocket.SendTo(data, remoteEndpoint);
 
         System.Console.WriteLine("Welkom verzonden!");
+    }
+
+    private void HandleDNSLookup(Message message)
+    {
+        System.Console.WriteLine("DNSLookup ontvangen met MsgId " + message.MsgId);
+
+        try
+        {
+            // Probeer de content te interpreteren als JSON-object (Type + Name)
+            var lookupRequest = JsonSerializer.Deserialize<DNSRecord>(message.Content.ToString() ?? "");
+
+            if (lookupRequest == null || string.IsNullOrEmpty(lookupRequest.Type) || string.IsNullOrEmpty(lookupRequest.Name))
+            {
+                SendError(message.MsgId, "Ongeldige lookup content.");
+                return;
+            }
+
+            // Laad DNS-records uit JSON bestand
+            string jsonPath = Path.Combine(AppContext.BaseDirectory, "dns_records.json");
+            if (!File.Exists(jsonPath))
+            {
+                SendError(message.MsgId, "DNS bestand niet gevonden");
+                return;
+            }
+
+            string json = File.ReadAllText(jsonPath);
+            List<DNSRecord>? records = JsonSerializer.Deserialize<List<DNSRecord>>(json);
+
+            if (records == null)
+            {
+                SendError(message.MsgId, "Kan DNS-bestand niet inlezen.");
+                return;
+            }
+
+            // Zoek naar een match (Type en Name)
+            var match = records.FirstOrDefault(r =>
+                r.Type.Equals(lookupRequest.Type, StringComparison.OrdinalIgnoreCase) &&
+                r.Name.Equals(lookupRequest.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (match != null)
+            {
+                Message reply = new Message
+                {
+                    MsgId = message.MsgId,
+                    Type = MessageType.DNSLookupReply,
+                    Content = match
+                };
+
+                string replyJson = JsonSerializer.Serialize(reply);
+                byte[] replyBytes = Encoding.UTF8.GetBytes(replyJson);
+                serverSocket.SendTo(replyBytes, remoteEndpoint);
+                Console.WriteLine("DNSLookupReply verzonden.");
+            }
+            else
+            {
+                SendError(message.MsgId, "Geen DNS-record gevonden voor " + lookupRequest.Name);
+            }
+        }
+        catch (System.Exception e)
+        {
+            SendError(message.MsgId, "Fout tijdens verwerken van lookup: " + e.Message);
+        }
+    }
+
+    public void SendError(int originalMsgId, string errorMessage)
+    {
+        Message error = new Message
+        {
+            MsgId = originalMsgId,
+            Type = MessageType.Error,
+            Content = errorMessage
+        };
+
+        string errorJson = JsonSerializer.Serialize(error);
+        byte[] errorBytes = Encoding.UTF8.GetBytes(errorJson);
+        serverSocket.SendTo(errorBytes, remoteEndpoint);
+        System.Console.WriteLine("Error verzenden:" + errorMessage);
     }
 
     //TODO: create all needed objects for your sockets 
