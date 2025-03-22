@@ -122,16 +122,8 @@ class ClientUDP
         string json = JsonSerializer.Serialize(msg);
         byte[] data = Encoding.UTF8.GetBytes(json);
         _socket.SendTo(data, _serverEndpoint);
-
         // Log DNSRecord apart indien van toepassing
-        if (msg.Type == MessageType.DNSLookup && msg.Content is string content)
-        {
-            var dnsRecord = JsonSerializer.Deserialize<DNSRecord>(content);
-            Console.WriteLine("Client: DNSRecord:");
-            Console.WriteLine(JsonSerializer.Serialize(dnsRecord, new JsonSerializerOptions { WriteIndented = true }));
-        }
-
-        LogMessage(msg);
+        LogMessage(msg, "Sent");
     }
 
     private Message ReceiveMessage()
@@ -140,12 +132,12 @@ class ClientUDP
         EndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
         int received = _socket.ReceiveFrom(buffer, ref remoteEP);
         var parsed = JsonSerializer.Deserialize<Message>(Encoding.UTF8.GetString(buffer, 0, received))!;
-        LogMessage(parsed);
+        LogMessage(parsed, "Received");
         return parsed;
     }
 
     private void LogMessage(Message msg, string prefix = "Sent")
     {
-        Console.WriteLine($"{prefix}: " + JsonSerializer.Serialize(msg, new JsonSerializerOptions { WriteIndented = true }));
+            Console.WriteLine($"{prefix}: " + JsonSerializer.Serialize(msg, new JsonSerializerOptions { WriteIndented = true }));
     }
 }
