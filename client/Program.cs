@@ -6,134 +6,146 @@ using System.Text.Json;
 using System.Collections.Generic;
 using MessageNS;
 
-// Data model for DNS records
-public class DNSRecord
+class Program
 {
-    public string Type { get; set; }
-    public string Name { get; set; }
-    public string? Value { get; set; }
-    public int? TTL { get; set; }
-    public int? Priority { get; set; }
+    static void Main(string[] args)
+    {
+        var testLookups = new List<DNSRecord>
+        {
+            new DNSRecord { Type = "A", Name = "www.example.com" },       // geldig
+            new DNSRecord { Type = "MX", Name = "mail.example.com" },      // geldig
+            new DNSRecord { Type = "A", Name = "nonexistent.domain" },     // ongeldig
+            new DNSRecord { Type = "CNAME", Name = "alias.example.com" }   // ongeldig of niet ondersteund
+        };
+
+        foreach (var dnsLookup in testLookups)
+        {
+            var client = new ClientUDP();
+            client.start(dnsLookup);
+        }
+    }
 }
 
-public class DNSClient
+public class Setting
 {
-    private const int ServerPort = 9000;
+    public int ServerPortNumber { get; set; }
+    public string? ServerIPAddress { get; set; }
+    public int ClientPortNumber { get; set; }
+    public string? ClientIPAddress { get; set; }
+}
+
+class ClientUDP
+{
+    private const int ServerPort = 11000;
     private readonly Socket _socket;
     private readonly IPEndPoint _serverEndpoint;
+    private int MsgIdCount = 0;
 
-    public DNSClient(string serverIp)
+    public ClientUDP()
     {
-        // Stap 1: socket aanmaken en server IP/poort instellen
         _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        _serverEndpoint = new IPEndPoint(IPAddress.Parse(serverIp), ServerPort);
+        _serverEndpoint = new IPEndPoint(IPAddress.Loopback, ServerPort);
     }
 
-    public void Run()
+    public void start(DNSRecord dnsLookup)
     {
         try
         {
-            // Stap 2: verstuur Hello bericht naar de server
-            var helloMsg = new Message { Type = MessageType.Hello, Content = "Hello from client" };
-            Console.WriteLine(helloMsg);
+            Console.WriteLine("\n\n\nClient: Starting client met DNSlookup: \n");
+
+            Message helloMsg = new Message
+            {
+                MsgId = ++MsgIdCount,
+                Type = MessageType.Hello,
+                Content = "Hello from client"
+            };
             SendMessage(helloMsg);
 
-            // Stap 3: wacht op Welcome bericht van server
             var welcome = ReceiveMessage();
-            Console.WriteLine(welcome);
             if (welcome.Type != MessageType.Welcome)
             {
-                Console.WriteLine("Did not receive Welcome message from server. Exiting.");
+                Console.WriteLine("Received: Did not receive Welcome message from server. Exiting.");
+                return;
+            }
+            if (welcome.MsgId != MsgIdCount)
+            {
+                Console.WriteLine("Received: Wrong message ID. Expected: " + MsgIdCount + " got: " + welcome.MsgId);
+                return;
+            }
+            Console.WriteLine("Client: Handshake completed. Connected to server.");
+
+            Message dnsLookupMsg = new Message
+            {
+                MsgId = ++MsgIdCount,
+                Type = MessageType.DNSLookup,
+                Content = JsonSerializer.Serialize(dnsLookup)
+            };
+            SendMessage(dnsLookupMsg);
+            int dnsLookupReplyMsgId = dnsLookupMsg.MsgId;
+
+            Message DnsLookupReply = ReceiveMessage();
+            if (DnsLookupReply.Type != MessageType.DNSLookupReply)
+            {
+                Console.WriteLine("Received: Expected DNSLookupReply message but got: " + DnsLookupReply.Type);
+                return;
+            }
+            if (DnsLookupReply.MsgId != dnsLookupReplyMsgId)
+            {
+                Console.WriteLine("Received: Wrong DNSLookupReply message ID. Expected: " + dnsLookupReplyMsgId + " got: " + DnsLookupReply.MsgId);
                 return;
             }
 
-            Console.WriteLine("Handshake completed. Connected to server.\n");
-
-            // Stap 4: begin menu-loop voor DNS lookups
-            while (true)
+            Message ackMsg = new Message
             {
-                Console.WriteLine("--- DNS Client Menu ---");
-                Console.WriteLine("1. Send DNS Lookup");
-                Console.WriteLine("2. Exit");
-                Console.Write("Choose option: ");
-                var choice = Console.ReadLine();
+                MsgId = ++MsgIdCount,
+                Type = MessageType.Ack,
+                Content = dnsLookupReplyMsgId.ToString()
+            };
+            SendMessage(ackMsg);
 
-                if (choice == "1")
-                {
-                    // Stap 5: vraag gebruiker om type en naam
-                    Console.Write("Type (A or MX): ");
-                    string type = Console.ReadLine() ?? "";
-                    Console.Write("Name (e.g., www.example.com): ");
-                    string name = Console.ReadLine() ?? "";
-
-                    // Stap 6: maak DNSRequest aan en verstuur naar server
-                    var request = new DNSRecord { Type = type, Name = name };
-                    var dnsLookupMsg = new Message
-                    {
-                        Type = MessageType.RequestData,
-                        Content = JsonSerializer.Serialize(request)
-                    };
-                    Console.WriteLine(dnsLookupMsg);
-                    SendMessage(dnsLookupMsg);
-
-                    // Stap 7: ontvang antwoord van server (Data of Error)
-                    var reply = ReceiveMessage();
-                    Console.WriteLine(reply);
-                    Console.WriteLine($"[Client] Received: {reply.Type} | Content length: {reply.Content?.Length} chars");
-
-                    // Stap 8: bevestig ontvangst met Ack
-                    var ackMsg = new Message { Type = MessageType.Ack, Content = name };
-                    Console.WriteLine(ackMsg);
-                    SendMessage(ackMsg);
-                }
-                else if (choice == "2")
-                {
-                    // Stap 9: stuur End bericht naar server en stop client
-                    var endMsg = new Message { Type = MessageType.End, Content = "End from client" };
-                    Console.WriteLine(endMsg);
-                    Console.WriteLine("Exiting client.");
-                    break;
-                }
+            Message endMsg = ReceiveMessage();
+            if (endMsg.Type != MessageType.End)
+            {
+                Console.WriteLine("Received: Expected End message but got: " + endMsg.Type);
+                return;
             }
+            Console.WriteLine("End ontvangen. Exiting client.\n\n");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Client] Error: {ex.Message}");
+            Console.WriteLine($"Client: Error: {ex.Message}");
         }
     }
 
-    // Verstuur bericht via UDP socket
     private void SendMessage(Message msg)
     {
         string json = JsonSerializer.Serialize(msg);
         byte[] data = Encoding.UTF8.GetBytes(json);
         _socket.SendTo(data, _serverEndpoint);
-        Console.WriteLine($"[Client] Sent {data.Length} bytes to server.");
+
+        // Log DNSRecord apart indien van toepassing
+        if (msg.Type == MessageType.DNSLookup && msg.Content is string content)
+        {
+            var dnsRecord = JsonSerializer.Deserialize<DNSRecord>(content);
+            Console.WriteLine("Client: DNSRecord:");
+            Console.WriteLine(JsonSerializer.Serialize(dnsRecord, new JsonSerializerOptions { WriteIndented = true }));
+        }
+
+        LogMessage(msg);
     }
 
-    // Ontvang bericht via UDP socket
     private Message ReceiveMessage()
     {
         byte[] buffer = new byte[4096];
         EndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
-        int size = _socket.ReceiveFrom(buffer, ref remoteEP);
-        Console.WriteLine($"[Client] Received {size} bytes from server.");
-        string json = Encoding.UTF8.GetString(buffer, 0, size);
-        return JsonSerializer.Deserialize<Message>(json)!;
+        int received = _socket.ReceiveFrom(buffer, ref remoteEP);
+        var parsed = JsonSerializer.Deserialize<Message>(Encoding.UTF8.GetString(buffer, 0, received))!;
+        LogMessage(parsed);
+        return parsed;
     }
 
-
-}
-
-// Server code exists in separate solution
-public class Program
-{
-    public static void Main(string[] args)
+    private void LogMessage(Message msg, string prefix = "Sent")
     {
-        // Default: always start client with predefined server IP (e.g. localhost)
-        string serverIp = args.Length > 0 ? args[0] : "127.0.0.1";
-
-        // Start de DNS client
-        new DNSClient(serverIp).Run();
+        Console.WriteLine($"{prefix}: " + JsonSerializer.Serialize(msg, new JsonSerializerOptions { WriteIndented = true }));
     }
 }

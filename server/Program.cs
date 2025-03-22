@@ -112,7 +112,7 @@ class ServerUDP
         System.Console.WriteLine("Hello ontvangen met MsgId " + message.MsgId);
 
         // Stuur een Welcome met een nieuwe ID terug
-        SendWelcome(message.MsgId + 1);
+        SendWelcome(message.MsgId);
     }
 
     private void SendWelcome(int replyMsgId)
@@ -150,7 +150,7 @@ class ServerUDP
             }
 
             // Laad DNS-records uit JSON bestand
-            string jsonPath = Path.Combine(AppContext.BaseDirectory, "dns_records.json");
+            string jsonPath = Path.Combine(Directory.GetCurrentDirectory(), "dns_records.json");
             if (!File.Exists(jsonPath))
             {
                 SendError(message.MsgId, "DNS bestand niet gevonden");
@@ -216,14 +216,17 @@ class ServerUDP
     public void HandleAck(Message message)
     {
         System.Console.WriteLine("Ack ontvangen voor MsgId: " + message.Content);
-        ackCounter++;
-
-        // Als alle 4 Ack's binnen zijn -> stuur end
-        if (ackCounter >= expectedAcks)
-        {
-            SendEnd();
-            ackCounter = 0; // Reset voor de volgende client
-        }
+        //ackCounter++;
+        SendEnd();
+        //Geen counter nodig. Na elke ack doet de server de verbinding verbreken.
+        //Ack counter is niet betrouwbaar om dan de verbinding te verbreken. 
+        //Als je geen ack krijgt van de client omdat de hij een verkeerd bericht stuurt blijft de verbinding staan. Want je hebt niet je hoevheid acks die je verwacht.
+        //// Als alle 4 Ack's binnen zijn -> stuur end
+        //if (ackCounter >= expectedAcks)
+        //{
+        //    SendEnd();
+        //    ackCounter = 0; // Reset voor de volgende client
+        //}
     }
 
     private void SendEnd()
