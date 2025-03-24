@@ -30,12 +30,6 @@ class ServerUDP
     // Server luistert op poort 11000
     private const int port = 11000;
 
-    // Teller voor de ontvangen Acks
-    private int ackCounter = 0;
-
-    // We wachten voor ontvangen van 4 Ack-berichten
-    private const int expectedAcks = 4;
-
     // Hoofdloop van server
     public void start()
     {
@@ -216,17 +210,7 @@ class ServerUDP
     public void HandleAck(Message message)
     {
         System.Console.WriteLine("Ack ontvangen voor MsgId: " + message.Content);
-        //ackCounter++;
         SendEnd();
-        //Geen counter nodig. Na elke ack doet de server de verbinding verbreken.
-        //Ack counter is niet betrouwbaar om dan de verbinding te verbreken. 
-        //Als je geen ack krijgt van de client omdat de hij een verkeerd bericht stuurt blijft de verbinding staan. Want je hebt niet je hoevheid acks die je verwacht.
-        //// Als alle 4 Ack's binnen zijn -> stuur end
-        //if (ackCounter >= expectedAcks)
-        //{
-        //    SendEnd();
-        //    ackCounter = 0; // Reset voor de volgende client
-        //}
     }
 
     private void SendEnd()
