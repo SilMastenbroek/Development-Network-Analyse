@@ -7,7 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using MessageNS;
-
+using System.Timers;
 
 // Do not modify this class
 class Program
@@ -23,18 +23,24 @@ class ServerUDP
 {
     // De socket waarmee de UDP-berichten verzenden en ontvangen
     private Socket serverSocket;
-
     // Het IP + poort van de client die we bedienen
     private EndPoint remoteEndpoint;
-
     // Server luistert op poort 11000
     private const int port = 11000;
 
     // Bijhouden in welke stap we zitten
     private enum ExpectedStep { Hello, Lookup, Ack }
-
     // Standaard eerste step is een handshake
     private ExpectedStep currentStep = ExpectedStep.Hello;
+
+    // Timeout logica
+    private System.Timers.Timer timeoutTimer;
+    // 10 seconden in ms
+    private const double timeoutDuration = 10000;
+    // Voorkomt dubbele End
+    private bool isTimeoutActive = false;
+    private System.Threading.Timer? countdownLogger;
+    private int secondsLeft = 10;
 
     // Hoofdloop van server
     public void start()
@@ -43,12 +49,26 @@ class ServerUDP
         InitializeSocket(); // Socket opzetten en binden
         System.Console.WriteLine("Server luistert op poort " + port);
 
+        // Timer instellen voor inactivity
+        timeoutTimer = new System.Timers.Timer(timeoutDuration);
+        timeoutTimer.Elapsed += OnTimeoutReached;
+        timeoutTimer.AutoReset = false;
+        timeoutTimer.Start();
+
         while (true)
         {
             try
             {
                 // Ontvang binnendkomend bericht
                 Message message = ReceiveMessage();
+
+                // Reset timer bij elk geldig bericht
+                timeoutTimer.Stop();
+                timeoutTimer.Start();
+                isTimeoutActive = false;
+
+                StopCountdownLog(); // stop vorige log-timer (indien actief)
+                StartCountdownLog(); // start nieuwe aftel-timer
 
                 // Genegeerd (bijvoorbeeld een eigen bericht)
                 if (message.MsgId == -1)
@@ -262,6 +282,34 @@ class ServerUDP
     {
         System.Console.WriteLine("Ack ontvangen voor MsgId: " + message.Content);
         SendEnd();
+    }
+
+    private void OnTimeoutReached(object? sender, ElapsedEventArgs e)
+    {
+        if (!isTimeoutActive)
+        {
+            isTimeoutActive = true;
+            Console.WriteLine("Timeout: Geen bericht ontvangen in 10 seconden. Verstuur End.");
+            SendEnd();
+        }
+    }
+
+    private void StartCountdownLog()
+    {
+        secondsLeft = 10;
+        countdownLogger = new System.Threading.Timer(state =>
+        {
+            if (secondsLeft > 0)
+            {
+                Console.WriteLine($"⏳ Timeout over {secondsLeft} seconden...");
+                secondsLeft--;
+            }
+        }, null, 0, 1000); // start meteen, tick elke 1000ms
+    }
+
+    private void StopCountdownLog()
+    {
+        countdownLogger?.Dispose();
     }
 
     private void SendEnd()
