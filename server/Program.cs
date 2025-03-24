@@ -30,6 +30,12 @@ class ServerUDP
     // Server luistert op poort 11000
     private const int port = 11000;
 
+    // Bijhouden in welke stap we zitten
+    private enum ExpectedStep { Hello, Lookup, Ack }
+
+    // Standaard eerste step is een handshake
+    private ExpectedStep currentStep = ExpectedStep.Hello;
+
     // Hoofdloop van server
     public void start()
     {
@@ -48,18 +54,63 @@ class ServerUDP
                 if (message.MsgId == -1)
                     continue;
 
-                // Verwerk op basis van MessageType
-                if (message.Type == MessageType.Hello)
-                    HandleHello(message);
+                switch (currentStep)
+                {
+                    // Server verwacht een Hello van de client
+                    case ExpectedStep.Hello:
+                        if (message.Type == MessageType.Hello)
+                        {
+                            // Hello ontvangen stuur Welcome terug
+                            HandleHello(message);
 
-                else if(message.Type == MessageType.DNSLookup)
-                    HandleDNSLookup(message);
+                            // Ga naar de volgende stap: nu verwachten we een DNSlookup
+                            currentStep = ExpectedStep.Lookup;
+                        }
+                        else
+                        {
+                            // Alles behalve Hello is ongeldig in deze stap
+                            SendError(message.MsgId, "Verwacht Hello als eerste bericht.");
+                        }
+                        break;
 
-                else if (message.Type == MessageType.Ack)
-                    HandleAck(message);
+                    // Server verwacht een DNSLookup van de client
+                    case ExpectedStep.Lookup:
+                        if (message.Type == MessageType.DNSLookup)
+                        {
+                            // Verwerk de DNSLookup
+                            HandleDNSLookup(message);
 
-                else
-                    System.Console.WriteLine("Verwachtte Hello, maar kreeg iets anders: " + message.Type);       
+                            // Volgende stap: wacht op bevestiging via Ack
+                            currentStep = ExpectedStep.Ack;
+                        }
+                        else
+                        {
+                            // Geen DNSLookup terwijl dat wel verwacht werd
+                            SendError(message.MsgId, "Verwacht DNSLookup na Hello.");
+                        }
+                        break;
+
+                    // Server verwacht een Ack ter bevestiging van de DNSReply
+                    case ExpectedStep.Ack:
+                        if (message.Type == MessageType.Ack)
+                        {
+                            // Ack ontvangen, sessie voor deze lookup is afgerond
+                            HandleAck(message);
+
+                            // Server staat weer klaar voor nieuwe DNSLookup (zelfde sessie)
+                            currentStep = ExpectedStep.Lookup;
+                        }
+                        else
+                        {
+                            // iets anders dan Ack ontvangen
+                            SendError(message.MsgId, "Verwacht Ack na DNSLookupReply.");
+                        }
+                        break;
+
+                    default:
+                        SendError(message.MsgId, "Onbekende stap in protocol.");
+                        break;
+                }       
             }
             catch (System.Exception e)
             {
