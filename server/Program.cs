@@ -101,7 +101,7 @@ class ServerUDP
                             HandleDNSLookup(message);
 
                             // Volgende stap: wacht op bevestiging via Ack
-                            currentStep = ExpectedStep.Ack;
+                            //currentStep = ExpectedStep.Ack; //Joey: deze heb ik verplaatst naar de handleDNSLookup method
                         }
                         else
                         {
@@ -250,6 +250,7 @@ class ServerUDP
                 byte[] replyBytes = Encoding.UTF8.GetBytes(replyJson);
                 serverSocket.SendTo(replyBytes, remoteEndpoint);
                 Console.WriteLine("DNSLookupReply verzonden.");
+                currentStep = ExpectedStep.Ack; // dit zorgt ervoor dat we pas weer een ack verwachten bij een goed afgehandelde lookup.
             }
             else
             {
@@ -281,7 +282,7 @@ class ServerUDP
     public void HandleAck(Message message)
     {
         System.Console.WriteLine("Ack ontvangen voor MsgId: " + message.Content);
-        SendEnd();
+        //SendEnd();
     }
 
     private void OnTimeoutReached(object? sender, ElapsedEventArgs e)
