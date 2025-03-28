@@ -28,15 +28,6 @@ class Program
     }
 }
 
-public class Setting
-{
-    public int ServerPortNumber { get; set; }
-    public string? ServerIPAddress { get; set; }
-    public int ClientPortNumber { get; set; }
-    public string? ClientIPAddress { get; set; }
-}
-
-
 class ClientUDP
 {
     private const int ServerPort = 11000;
