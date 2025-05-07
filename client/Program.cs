@@ -84,7 +84,7 @@ class ClientUDP
         var message = new Message
         {
             MsgId = ++messageIdCounter,
-            Type = MessageType.Hello,
+            MsgType = MessageType.Hello,
             Content = "Hello from client"
         };
 
@@ -103,7 +103,7 @@ class ClientUDP
         var lookupMsg = new Message
         {
             MsgId = ++messageIdCounter,
-            Type = MessageType.DNSLookup,
+            MsgType = MessageType.DNSLookup,
             Content = JsonSerializer.Serialize(record)
         };
 
@@ -120,7 +120,7 @@ class ClientUDP
         var ack = new Message
         {
             MsgId = ++messageIdCounter,
-            Type = MessageType.Ack,
+            MsgType = MessageType.Ack,
             Content = lastDNSLookupMsgId.ToString()
         };
 
@@ -141,14 +141,14 @@ class ClientUDP
         {
             var message = WaitForMessage();
 
-            if (message.Type == MessageType.End)
+            if (message.MsgType == MessageType.End)
             {
                 return HandleEnd(message);
             }
 
-            if (message.Type != expectedType)
+            if (message.MsgType != expectedType)
             {
-                Console.WriteLine($"Fout: Verwacht '{expectedType}', kreeg '{message.Type}'");
+                Console.WriteLine($"Fout: Verwacht '{expectedType}', kreeg '{message.MsgType}'");
                 return false;
             }
 
@@ -158,7 +158,7 @@ class ClientUDP
                 return false;
             }
 
-            switch (message.Type)
+            switch (message.MsgType)
             {
                 case MessageType.Welcome: return HandleWelcome(message);
                 case MessageType.DNSLookupReply: return HandleDNSLookupReply(message);
@@ -251,9 +251,9 @@ class ClientUDP
 
     private bool HandleWelcome(Message msg)
     {
-        if (msg.Type != MessageType.Welcome)
+        if (msg.MsgType != MessageType.Welcome)
         {
-            Console.WriteLine("Received: Expected Welcome message but got: " + msg.Type);
+            Console.WriteLine("Received: Expected Welcome message but got: " + msg.MsgType);
             return false;
         }
 
@@ -263,9 +263,9 @@ class ClientUDP
 
     private bool HandleDNSLookupReply(Message msg)
     {
-        if (msg.Type != MessageType.DNSLookupReply)
+        if (msg.MsgType != MessageType.DNSLookupReply)
         {
-            Console.WriteLine("Received: Expected DNSLookupReply message but got: " + msg.Type);
+            Console.WriteLine("Received: Expected DNSLookupReply message but got: " + msg.MsgType);
             return false;
         }
 
@@ -275,9 +275,9 @@ class ClientUDP
 
     private bool HandleEnd(Message msg)
     {
-        if (msg.Type != MessageType.End)
+        if (msg.MsgType != MessageType.End)
         {
-            Console.WriteLine("Received: Expected End message but got: " + msg.Type);
+            Console.WriteLine("Received: Expected End message but got: " + msg.MsgType);
             return false;
         }
 

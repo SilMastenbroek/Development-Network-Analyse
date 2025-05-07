@@ -78,7 +78,7 @@ class ServerUDP
                 {
                     // Server verwacht een Hello van de client
                     case ExpectedStep.Hello:
-                        if (message.Type == MessageType.Hello)
+                        if (message.MsgType == MessageType.Hello)
                         {
                             // Hello ontvangen stuur Welcome terug
                             HandleHello(message);
@@ -95,7 +95,7 @@ class ServerUDP
 
                     // Server verwacht een DNSLookup van de client
                     case ExpectedStep.Lookup:
-                        if (message.Type == MessageType.DNSLookup)
+                        if (message.MsgType == MessageType.DNSLookup)
                         {
                             // Verwerk de DNSLookup
                             HandleDNSLookup(message);
@@ -109,7 +109,7 @@ class ServerUDP
 
                     // Server verwacht een Ack ter bevestiging van de DNSReply
                     case ExpectedStep.Ack:
-                        if (message.Type == MessageType.Ack)
+                        if (message.MsgType == MessageType.Ack)
                         {
                             // Ack ontvangen, sessie voor deze lookup is afgerond
                             HandleAck(message);
@@ -158,7 +158,7 @@ class ServerUDP
             remoteIp.Port == ((IPEndPoint)serverSocket.LocalEndPoint!).Port)
         {
             Console.WriteLine("Eigen bericht genegeerd.");
-            return new Message { MsgId = -1, Type = MessageType.Error, Content = "Echo ignored" };
+            return new Message { MsgId = -1, MsgType = MessageType.Error, Content = "Echo ignored" };
         }
 
         // Verwerk binnengekomen bericht
@@ -183,7 +183,7 @@ class ServerUDP
         Message welcome = new Message
         {
             MsgId = replyMsgId,
-            Type = MessageType.Welcome,
+            MsgType = MessageType.Welcome,
             Content = "Welkom van de server!"
         };
 
@@ -239,7 +239,7 @@ class ServerUDP
                 Message reply = new Message
                 {
                     MsgId = message.MsgId,
-                    Type = MessageType.DNSLookupReply,
+                    MsgType = MessageType.DNSLookupReply,
                     Content = JsonSerializer.Serialize(match)
                 };
 
@@ -266,7 +266,7 @@ class ServerUDP
         Message error = new Message
         {
             MsgId = originalMsgId,
-            Type = MessageType.Error,
+            MsgType = MessageType.Error,
             Content = errorMessage
         };
 
@@ -314,7 +314,7 @@ class ServerUDP
         Message endMessage = new Message
         {
             MsgId = 9999,
-            Type = MessageType.End,
+            MsgType = MessageType.End,
             Content = "Alle lookups afgehandeld"
         };
 
