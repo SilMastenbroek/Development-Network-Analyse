@@ -153,10 +153,20 @@ class ServerUDP
     private Message ReceiveMessage()
     {
         byte[] buffer = new byte[4096];
-        int received = serverSocket.ReceiveFrom(buffer, ref Endpoint);
+        EndPoint senderEndpoint = new IPEndPoint(IPAddress.Any, 0);
+        int received = serverSocket.ReceiveFrom(buffer, ref senderEndpoint);
+
+        // Herken unieke client via IP + poort
+        string clientKey = senderEndpoint.ToString();
+
+        // Als deze client onbekend is, voeg toe
+        if (!clients.ContainsKey(clientKey))
+            clients[clientKey] = new ClientState { Endpoint = senderEndpoint };
+
+        Endpoint = senderEndpoint;
 
         // Filter: voorkom dat de server zijn eigen bericht opvangt
-        if (Endpoint is IPEndPoint remoteIp &&
+        if (senderEndpoint is IPEndPoint remoteIp &&
             remoteIp.Address.Equals(IPAddress.Loopback) &&
             remoteIp.Port == ((IPEndPoint)serverSocket.LocalEndPoint!).Port)
         {
