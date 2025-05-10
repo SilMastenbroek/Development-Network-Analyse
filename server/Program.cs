@@ -109,7 +109,7 @@ class ServerUDP
 
                         client.LastLookupMsgId = message.MsgId;
                         // Verwerk de DNSLookup
-                        HandleDNSLookup(message);
+                        HandleDNSLookup(message, client);
                         client.currentStep = ExpectedStep.Ack;
                         break;
 
@@ -217,7 +217,7 @@ class ServerUDP
         System.Console.WriteLine("Welkom verzonden!");
     }
 
-    private void HandleDNSLookup(Message message)
+    private void HandleDNSLookup(Message message, ClientState client)
     {
         System.Console.WriteLine("DNSLookup ontvangen met MsgId " + message.MsgId);
 
@@ -225,6 +225,8 @@ class ServerUDP
         {
             // Parse content als DNSRecord (Type + Name)
             var lookupRequest = JsonSerializer.Deserialize<DNSRecord>(message.Content.ToString() ?? "");
+            string type = lookupRequest.Type;
+            string name = lookupRequest.Name;
 
             // Validate: incomplete lookup?
             if (lookupRequest == null || string.IsNullOrEmpty(lookupRequest.Type) || string.IsNullOrEmpty(lookupRequest.Name))
@@ -237,7 +239,7 @@ class ServerUDP
             string jsonPath = Path.Combine(Directory.GetCurrentDirectory(), "dns_records.json");
             if (!File.Exists(jsonPath))
             {
-                SendError(message.MsgId, "DNS bestand niet gevonden");
+                SendError(message.MsgId, "DNS bestand niet gevonden", client.Endpoint);
                 return;
             }
 
@@ -246,14 +248,14 @@ class ServerUDP
 
             if (records == null)
             {
-                SendError(message.MsgId, "Kan DNS-bestand niet inlezen.");
+                SendError(message.MsgId, "Kan DNS-bestand niet inlezen.", client.Endpoint);
                 return;
             }
 
             // Zoek naar een match (Type en Name)
             var match = records.FirstOrDefault(r =>
-                r.Type.Equals(lookupRequest.Type, StringComparison.OrdinalIgnoreCase) &&
-                r.Name.Equals(lookupRequest.Name, StringComparison.OrdinalIgnoreCase));
+                r.Type.Equals(type, StringComparison.OrdinalIgnoreCase) &&
+                r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
             if (match != null)
             {
@@ -265,25 +267,26 @@ class ServerUDP
                     Content = JsonSerializer.Serialize(match)
                 };
 
-                string replyJson = JsonSerializer.Serialize(reply);
-                byte[] replyBytes = Encoding.UTF8.GetBytes(replyJson);
-                serverSocket.SendTo(replyBytes, Endpoint);
+                SendMessage(reply, client.Endpoint);
                 Console.WriteLine("DNSLookupReply verzonden.");
-                currentStep = ExpectedStep.Ack;
             }
             else
             {
-                // Geen match
-                SendError(message.MsgId, "Geen DNS-record gevonden voor " + lookupRequest.Name);
+                SendError(message.MsgId, $"Geen DNS-record gevonden voor {name}", client.Endpoint);
             }
         }
-        catch (System.Exception e)
+        catch
         {
-            SendError(message.MsgId, "Fout tijdens verwerken van lookup: " + e.Message);
+            SendError(message.MsgId, "Ongeldige lookup content.", client.Endpoint);
         }
     }
 
     public void SendError(int originalMsgId, string errorMessage)
+    {
+        SendError(originalMsgId, errorMessage, Endpoint);
+    }
+
+    public void SendError(int originalMsgId, string errorMessage, EndPoint ep)
     {
         Message error = new Message
         {
@@ -292,10 +295,8 @@ class ServerUDP
             Content = errorMessage
         };
 
-        string errorJson = JsonSerializer.Serialize(error);
-        byte[] errorBytes = Encoding.UTF8.GetBytes(errorJson);
-        serverSocket.SendTo(errorBytes, Endpoint);
-        System.Console.WriteLine("Error verzenden:" + errorMessage);
+        SendMessage(error, ep);
+        System.Console.WriteLine("Error verzonden: " + errorMessage);
     }
 
     public void HandleAck(Message message)
@@ -329,6 +330,13 @@ class ServerUDP
     private void StopCountdownLog()
     {
         countdownLogger?.Dispose();
+    }
+
+    private void SendMessage(Message message, EndPoint target)
+    {
+        string json = JsonSerializer.Serialize(message);
+        byte[] data = Encoding.UTF8.GetBytes(json);
+        serverSocket.SendTo(data, target);
     }
 
     private void SendEnd()
