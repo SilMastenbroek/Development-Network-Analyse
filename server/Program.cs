@@ -65,6 +65,10 @@ class ServerUDP
                 // Ontvang binnendkomend bericht
                 Message message = ReceiveMessage();
 
+                // Haal client-informatie op
+                string clientKey = Endpoint.ToString();
+                ClientState client = clients[clientKey];
+
                 // Reset timer bij elk geldig bericht
                 timeoutTimer.Stop();
                 timeoutTimer.Start();
@@ -77,60 +81,65 @@ class ServerUDP
                 if (message.MsgId == -1)
                     continue;
 
-                switch (currentStep)
+                switch (message.MsgType)
                 {
                     // Server verwacht een Hello van de client
-                    case ExpectedStep.Hello:
-                        if (message.MsgType == MessageType.Hello)
-                        {
-                            // Hello ontvangen stuur Welcome terug
-                            HandleHello(message);
-
-                            // Ga naar de volgende stap: nu verwachten we een DNSlookup
-                            currentStep = ExpectedStep.Lookup;
-                        }
-                        else
+                    case MessageType.Hello:
+                        if (client.currentStep != ExpectedStep.Hello)
                         {
                             // Alles behalve Hello is ongeldig in deze stap
                             SendError(message.MsgId, "Verwacht Hello als eerste bericht.");
+                            break;
                         }
+
+                        // Hello ontvangen stuur Welcome terug
+                        HandleHello(message);
+                        // Ga naar de volgende stap: nu verwachten we een DNSlookup
+                        client.currentStep = ExpectedStep.Lookup;
                         break;
 
                     // Server verwacht een DNSLookup van de client
-                    case ExpectedStep.Lookup:
-                        if (message.MsgType == MessageType.DNSLookup)
-                        {
-                            // Verwerk de DNSLookup
-                            HandleDNSLookup(message);
-                        }
-                        else
+                    case MessageType.DNSLookup:
+                        if (client.currentStep != ExpectedStep.Lookup)
                         {
                             // Geen DNSLookup terwijl dat wel verwacht werd
                             SendError(message.MsgId, "Verwacht DNSLookup na Hello.");
+                            break;
                         }
+
+                        client.LastLookupMsgId = message.MsgId;
+                        // Verwerk de DNSLookup
+                        HandleDNSLookup(message);
+                        client.currentStep = ExpectedStep.Ack;
                         break;
 
                     // Server verwacht een Ack ter bevestiging van de DNSReply
-                    case ExpectedStep.Ack:
-                        if (message.MsgType == MessageType.Ack)
-                        {
-                            // Ack ontvangen, sessie voor deze lookup is afgerond
-                            HandleAck(message);
-
-                            // Server staat weer klaar voor nieuwe DNSLookup (zelfde sessie)
-                            currentStep = ExpectedStep.Lookup;
-                        }
-                        else
+                    case MessageType.Ack:
+                        if (client.currentStep != ExpectedStep.Ack)
                         {
                             // iets anders dan Ack ontvangen
                             SendError(message.MsgId, "Verwacht Ack na DNSLookupReply.");
+                            break;
+                        }
+
+                        int ackedMsgId = int.TryParse(message.Content?.ToString(), out var id) ? id : -1;
+                        if (ackedMsgId != client.LastLookupMsgId)
+                        {
+                            SendError(message.MsgId, "Ack komt niet overeen met laatste Lookup MsgId.");
+                        }
+                        else
+                        {
+                            // Ack ontvangen, sessie voor deze lookup is afgerond
+                            HandleAck(message);
+                            // Server staat weer klaar voor nieuwe DNSLookup (zelfde sessie)
+                            client.currentStep = ExpectedStep.Lookup;
                         }
                         break;
 
                     default:
-                        SendError(message.MsgId, "Onbekende stap in protocol.");
+                        SendError(message.MsgId, "Onbekend berichttype ontvangen.");
                         break;
-                }       
+                }
             }
             catch (System.Exception e)
             {
