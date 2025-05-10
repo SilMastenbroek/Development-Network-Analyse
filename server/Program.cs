@@ -21,18 +21,21 @@ class Program
 
 class ServerUDP
 {
+    private class ClientState
+    {
+        public EndPoint Endpoint { get; set; }
+        public ExpectedStep currentStep { get; set; } = ExpectedStep.Hello;
+        public int LastLookupMsgId { get; set; } = -1;
+    }
+
     // De socket waarmee de UDP-berichten verzenden en ontvangen
     private Socket serverSocket;
-    // Het IP + poort van de client die we bedienen
-    private EndPoint remoteEndpoint;
     // Server luistert op poort 11000
     private const int port = 11000;
-
-    // Bijhouden in welke stap we zitten
-    private enum ExpectedStep { Hello, Lookup, Ack }
-    // Standaard eerste step is een handshake
+    private EndPoint Endpoint;
     private ExpectedStep currentStep = ExpectedStep.Hello;
-
+    private enum ExpectedStep { Hello, Lookup, Ack }
+    private Dictionary<string, ClientState> clients = new();
     // Timeout logica
     private System.Timers.Timer timeoutTimer;
     // 10 seconden in ms
@@ -144,16 +147,16 @@ class ServerUDP
         serverSocket.Bind(localEndPoint);
 
         // Placeholder voor remote client
-        remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
+        Endpoint = new IPEndPoint(IPAddress.Any, 0);
     }
 
     private Message ReceiveMessage()
     {
         byte[] buffer = new byte[4096];
-        int received = serverSocket.ReceiveFrom(buffer, ref remoteEndpoint);
+        int received = serverSocket.ReceiveFrom(buffer, ref Endpoint);
 
         // Filter: voorkom dat de server zijn eigen bericht opvangt
-        if (remoteEndpoint is IPEndPoint remoteIp &&
+        if (Endpoint is IPEndPoint remoteIp &&
             remoteIp.Address.Equals(IPAddress.Loopback) &&
             remoteIp.Port == ((IPEndPoint)serverSocket.LocalEndPoint!).Port)
         {
@@ -190,7 +193,7 @@ class ServerUDP
         // Zet om naar JSON en verstuur naar de client
         string json = JsonSerializer.Serialize(welcome);
         byte[] data = Encoding.UTF8.GetBytes(json);
-        serverSocket.SendTo(data, remoteEndpoint);
+        serverSocket.SendTo(data, Endpoint);
 
         System.Console.WriteLine("Welkom verzonden!");
     }
@@ -245,7 +248,7 @@ class ServerUDP
 
                 string replyJson = JsonSerializer.Serialize(reply);
                 byte[] replyBytes = Encoding.UTF8.GetBytes(replyJson);
-                serverSocket.SendTo(replyBytes, remoteEndpoint);
+                serverSocket.SendTo(replyBytes, Endpoint);
                 Console.WriteLine("DNSLookupReply verzonden.");
                 currentStep = ExpectedStep.Ack;
             }
@@ -272,7 +275,7 @@ class ServerUDP
 
         string errorJson = JsonSerializer.Serialize(error);
         byte[] errorBytes = Encoding.UTF8.GetBytes(errorJson);
-        serverSocket.SendTo(errorBytes, remoteEndpoint);
+        serverSocket.SendTo(errorBytes, Endpoint);
         System.Console.WriteLine("Error verzenden:" + errorMessage);
     }
 
@@ -320,7 +323,7 @@ class ServerUDP
 
         string json = JsonSerializer.Serialize(endMessage);
         byte[] data = Encoding.UTF8.GetBytes(json);
-        serverSocket.SendTo(data, remoteEndpoint);
+        serverSocket.SendTo(data, Endpoint);
 
         System.Console.WriteLine("End verzonden naar client");
     }
