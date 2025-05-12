@@ -131,6 +131,7 @@ class ServerUDP
                         {
                             // Ack ontvangen, sessie voor deze lookup is afgerond
                             HandleAck(message);
+                            SendEnd(client.Endpoint);
                             // Server staat weer klaar voor nieuwe DNSLookup (zelfde sessie)
                             client.currentStep = ExpectedStep.Lookup;
                         }
@@ -351,6 +352,20 @@ class ServerUDP
         string json = JsonSerializer.Serialize(endMessage);
         byte[] data = Encoding.UTF8.GetBytes(json);
         serverSocket.SendTo(data, Endpoint);
+
+        System.Console.WriteLine("End verzonden naar client");
+    }
+
+    private void SendEnd(EndPoint ep)
+    {
+        Message endMessage = new Message
+        {
+            MsgId = 9999,
+            MsgType = MessageType.End,
+            Content = "Alle lookups afgehandeld"
+        };
+
+        SendMessage(endMessage, ep);
 
         System.Console.WriteLine("End verzonden naar client");
     }
