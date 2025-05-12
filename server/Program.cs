@@ -233,6 +233,7 @@ class ServerUDP
             if (lookupRequest == null || string.IsNullOrEmpty(lookupRequest.Type) || string.IsNullOrEmpty(lookupRequest.Name))
             {
                 SendError(message.MsgId, "Ongeldige lookup content.");
+                client.currentStep = ExpectedStep.Lookup; // herstel correcte stap
                 return;
             }
 
