@@ -276,11 +276,13 @@ class ServerUDP
             else
             {
                 SendError(message.MsgId, $"Geen DNS-record gevonden voor {name}", client.Endpoint);
+                client.currentStep = ExpectedStep.Lookup; // herstel correcte stap
             }
         }
         catch
         {
             SendError(message.MsgId, "Ongeldige lookup content.", client.Endpoint);
+            client.currentStep = ExpectedStep.Lookup; // herstel correcte stap
         }
     }
 
