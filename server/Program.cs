@@ -21,18 +21,21 @@ class Program
 
 class ServerUDP
 {
+    private class ClientState
+    {
+        public EndPoint Endpoint { get; set; }
+        public ExpectedStep currentStep { get; set; } = ExpectedStep.Hello;
+        public int LastLookupMsgId { get; set; } = -1;
+    }
+
     // De socket waarmee de UDP-berichten verzenden en ontvangen
     private Socket serverSocket;
-    // Het IP + poort van de client die we bedienen
-    private EndPoint remoteEndpoint;
     // Server luistert op poort 11000
     private const int port = 11000;
-
-    // Bijhouden in welke stap we zitten
-    private enum ExpectedStep { Hello, Lookup, Ack }
-    // Standaard eerste step is een handshake
+    private EndPoint Endpoint;
     private ExpectedStep currentStep = ExpectedStep.Hello;
-
+    private enum ExpectedStep { Hello, Lookup, Ack }
+    private Dictionary<string, ClientState> clients = new();
     // Timeout logica
     private System.Timers.Timer timeoutTimer;
     // 10 seconden in ms
@@ -62,6 +65,10 @@ class ServerUDP
                 // Ontvang binnendkomend bericht
                 Message message = ReceiveMessage();
 
+                // Haal client-informatie op
+                string clientKey = Endpoint.ToString();
+                ClientState client = clients[clientKey];
+
                 // Reset timer bij elk geldig bericht
                 timeoutTimer.Stop();
                 timeoutTimer.Start();
@@ -74,60 +81,66 @@ class ServerUDP
                 if (message.MsgId == -1)
                     continue;
 
-                switch (currentStep)
+                switch (message.MsgType)
                 {
                     // Server verwacht een Hello van de client
-                    case ExpectedStep.Hello:
-                        if (message.MsgType == MessageType.Hello)
-                        {
-                            // Hello ontvangen stuur Welcome terug
-                            HandleHello(message);
-
-                            // Ga naar de volgende stap: nu verwachten we een DNSlookup
-                            currentStep = ExpectedStep.Lookup;
-                        }
-                        else
+                    case MessageType.Hello:
+                        if (client.currentStep != ExpectedStep.Hello)
                         {
                             // Alles behalve Hello is ongeldig in deze stap
                             SendError(message.MsgId, "Verwacht Hello als eerste bericht.");
+                            break;
                         }
+
+                        // Hello ontvangen stuur Welcome terug
+                        HandleHello(message);
+                        // Ga naar de volgende stap: nu verwachten we een DNSlookup
+                        client.currentStep = ExpectedStep.Lookup;
                         break;
 
                     // Server verwacht een DNSLookup van de client
-                    case ExpectedStep.Lookup:
-                        if (message.MsgType == MessageType.DNSLookup)
-                        {
-                            // Verwerk de DNSLookup
-                            HandleDNSLookup(message);
-                        }
-                        else
+                    case MessageType.DNSLookup:
+                        if (client.currentStep != ExpectedStep.Lookup)
                         {
                             // Geen DNSLookup terwijl dat wel verwacht werd
                             SendError(message.MsgId, "Verwacht DNSLookup na Hello.");
+                            break;
                         }
+
+                        client.LastLookupMsgId = message.MsgId;
+                        // Verwerk de DNSLookup
+                        HandleDNSLookup(message, client);
+                        client.currentStep = ExpectedStep.Ack;
                         break;
 
                     // Server verwacht een Ack ter bevestiging van de DNSReply
-                    case ExpectedStep.Ack:
-                        if (message.MsgType == MessageType.Ack)
-                        {
-                            // Ack ontvangen, sessie voor deze lookup is afgerond
-                            HandleAck(message);
-
-                            // Server staat weer klaar voor nieuwe DNSLookup (zelfde sessie)
-                            currentStep = ExpectedStep.Lookup;
-                        }
-                        else
+                    case MessageType.Ack:
+                        if (client.currentStep != ExpectedStep.Ack)
                         {
                             // iets anders dan Ack ontvangen
                             SendError(message.MsgId, "Verwacht Ack na DNSLookupReply.");
+                            break;
+                        }
+
+                        int ackedMsgId = int.TryParse(message.Content?.ToString(), out var id) ? id : -1;
+                        if (ackedMsgId != client.LastLookupMsgId)
+                        {
+                            SendError(message.MsgId, "Ack komt niet overeen met laatste Lookup MsgId.");
+                        }
+                        else
+                        {
+                            // Ack ontvangen, sessie voor deze lookup is afgerond
+                            HandleAck(message);
+                            SendEnd(client.Endpoint);
+                            // Server staat weer klaar voor nieuwe DNSLookup (zelfde sessie)
+                            client.currentStep = ExpectedStep.Lookup;
                         }
                         break;
 
                     default:
-                        SendError(message.MsgId, "Onbekende stap in protocol.");
+                        SendError(message.MsgId, "Onbekend berichttype ontvangen.");
                         break;
-                }       
+                }
             }
             catch (System.Exception e)
             {
@@ -144,16 +157,26 @@ class ServerUDP
         serverSocket.Bind(localEndPoint);
 
         // Placeholder voor remote client
-        remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
+        Endpoint = new IPEndPoint(IPAddress.Any, 0);
     }
 
     private Message ReceiveMessage()
     {
         byte[] buffer = new byte[4096];
-        int received = serverSocket.ReceiveFrom(buffer, ref remoteEndpoint);
+        EndPoint senderEndpoint = new IPEndPoint(IPAddress.Any, 0);
+        int received = serverSocket.ReceiveFrom(buffer, ref senderEndpoint);
+
+        // Herken unieke client via IP + poort
+        string clientKey = senderEndpoint.ToString();
+
+        // Als deze client onbekend is, voeg toe
+        if (!clients.ContainsKey(clientKey))
+            clients[clientKey] = new ClientState { Endpoint = senderEndpoint };
+
+        Endpoint = senderEndpoint;
 
         // Filter: voorkom dat de server zijn eigen bericht opvangt
-        if (remoteEndpoint is IPEndPoint remoteIp &&
+        if (senderEndpoint is IPEndPoint remoteIp &&
             remoteIp.Address.Equals(IPAddress.Loopback) &&
             remoteIp.Port == ((IPEndPoint)serverSocket.LocalEndPoint!).Port)
         {
@@ -190,12 +213,12 @@ class ServerUDP
         // Zet om naar JSON en verstuur naar de client
         string json = JsonSerializer.Serialize(welcome);
         byte[] data = Encoding.UTF8.GetBytes(json);
-        serverSocket.SendTo(data, remoteEndpoint);
+        serverSocket.SendTo(data, Endpoint);
 
         System.Console.WriteLine("Welkom verzonden!");
     }
 
-    private void HandleDNSLookup(Message message)
+    private void HandleDNSLookup(Message message, ClientState client)
     {
         System.Console.WriteLine("DNSLookup ontvangen met MsgId " + message.MsgId);
 
@@ -203,11 +226,14 @@ class ServerUDP
         {
             // Parse content als DNSRecord (Type + Name)
             var lookupRequest = JsonSerializer.Deserialize<DNSRecord>(message.Content.ToString() ?? "");
+            string type = lookupRequest.Type;
+            string name = lookupRequest.Name;
 
             // Validate: incomplete lookup?
             if (lookupRequest == null || string.IsNullOrEmpty(lookupRequest.Type) || string.IsNullOrEmpty(lookupRequest.Name))
             {
                 SendError(message.MsgId, "Ongeldige lookup content.");
+                client.currentStep = ExpectedStep.Lookup; // herstel correcte stap
                 return;
             }
 
@@ -215,7 +241,8 @@ class ServerUDP
             string jsonPath = Path.Combine(Directory.GetCurrentDirectory(), "dns_records.json");
             if (!File.Exists(jsonPath))
             {
-                SendError(message.MsgId, "DNS bestand niet gevonden");
+                SendError(message.MsgId, "DNS bestand niet gevonden", client.Endpoint);
+                client.currentStep = ExpectedStep.Lookup; // herstel correcte stap
                 return;
             }
 
@@ -224,14 +251,14 @@ class ServerUDP
 
             if (records == null)
             {
-                SendError(message.MsgId, "Kan DNS-bestand niet inlezen.");
+                SendError(message.MsgId, "Kan DNS-bestand niet inlezen.", client.Endpoint);
                 return;
             }
 
             // Zoek naar een match (Type en Name)
             var match = records.FirstOrDefault(r =>
-                r.Type.Equals(lookupRequest.Type, StringComparison.OrdinalIgnoreCase) &&
-                r.Name.Equals(lookupRequest.Name, StringComparison.OrdinalIgnoreCase));
+                r.Type.Equals(type, StringComparison.OrdinalIgnoreCase) &&
+                r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
             if (match != null)
             {
@@ -243,25 +270,28 @@ class ServerUDP
                     Content = JsonSerializer.Serialize(match)
                 };
 
-                string replyJson = JsonSerializer.Serialize(reply);
-                byte[] replyBytes = Encoding.UTF8.GetBytes(replyJson);
-                serverSocket.SendTo(replyBytes, remoteEndpoint);
+                SendMessage(reply, client.Endpoint);
                 Console.WriteLine("DNSLookupReply verzonden.");
-                currentStep = ExpectedStep.Ack;
             }
             else
             {
-                // Geen match
-                SendError(message.MsgId, "Geen DNS-record gevonden voor " + lookupRequest.Name);
+                SendError(message.MsgId, $"Geen DNS-record gevonden voor {name}", client.Endpoint);
+                client.currentStep = ExpectedStep.Lookup; // herstel correcte stap
             }
         }
-        catch (System.Exception e)
+        catch
         {
-            SendError(message.MsgId, "Fout tijdens verwerken van lookup: " + e.Message);
+            SendError(message.MsgId, "Ongeldige lookup content.", client.Endpoint);
+            client.currentStep = ExpectedStep.Lookup; // herstel correcte stap
         }
     }
 
     public void SendError(int originalMsgId, string errorMessage)
+    {
+        SendError(originalMsgId, errorMessage, Endpoint);
+    }
+
+    public void SendError(int originalMsgId, string errorMessage, EndPoint ep)
     {
         Message error = new Message
         {
@@ -270,10 +300,8 @@ class ServerUDP
             Content = errorMessage
         };
 
-        string errorJson = JsonSerializer.Serialize(error);
-        byte[] errorBytes = Encoding.UTF8.GetBytes(errorJson);
-        serverSocket.SendTo(errorBytes, remoteEndpoint);
-        System.Console.WriteLine("Error verzenden:" + errorMessage);
+        SendMessage(error, ep);
+        System.Console.WriteLine("Error verzonden: " + errorMessage);
     }
 
     public void HandleAck(Message message)
@@ -309,6 +337,13 @@ class ServerUDP
         countdownLogger?.Dispose();
     }
 
+    private void SendMessage(Message message, EndPoint target)
+    {
+        string json = JsonSerializer.Serialize(message);
+        byte[] data = Encoding.UTF8.GetBytes(json);
+        serverSocket.SendTo(data, target);
+    }
+
     private void SendEnd()
     {
         Message endMessage = new Message
@@ -320,7 +355,21 @@ class ServerUDP
 
         string json = JsonSerializer.Serialize(endMessage);
         byte[] data = Encoding.UTF8.GetBytes(json);
-        serverSocket.SendTo(data, remoteEndpoint);
+        serverSocket.SendTo(data, Endpoint);
+
+        System.Console.WriteLine("End verzonden naar client");
+    }
+
+    private void SendEnd(EndPoint ep)
+    {
+        Message endMessage = new Message
+        {
+            MsgId = 9999,
+            MsgType = MessageType.End,
+            Content = "Alle lookups afgehandeld"
+        };
+
+        SendMessage(endMessage, ep);
 
         System.Console.WriteLine("End verzonden naar client");
     }
