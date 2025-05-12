@@ -242,6 +242,7 @@ class ServerUDP
             if (!File.Exists(jsonPath))
             {
                 SendError(message.MsgId, "DNS bestand niet gevonden", client.Endpoint);
+                client.currentStep = ExpectedStep.Lookup; // herstel correcte stap
                 return;
             }
 
