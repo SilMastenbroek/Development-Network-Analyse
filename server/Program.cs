@@ -35,88 +35,135 @@ class ServerUDP
     static Setting? setting = JsonSerializer.Deserialize<Setting>(configContent);
 
     // TODO: [Read the JSON file and return the list of DNSRecords]
+    // Lees het DNS-recordbestand in (geformatteerd als JSON-array) dat gebruikt wordt voor DNS-queries.
     static DNSRecord[]? dNSRecords = JsonSerializer.Deserialize<DNSRecord[]>(File.ReadAllText(@"dns_records.json"));
 
-    // (zelf toegevoegd) Define the steps for the server state machine
     enum ServerStep { AwaitHello, AwaitLookup, AwaitAck }
     static ServerStep currentStep = ServerStep.AwaitHello;
     static System.Timers.Timer inactivityTimer;
     static int countdown;
 
+    // Houdt bij welke MsgId de server als laatst heeft gebruikt
+    static int serverMsgIdCounter = 1;
 
     public static void start()
     {
         // TODO: [Create a socket and endpoints and bind it to the server IP address and port number]
-
-        // Maak een IPEndPoint-object voor het binden van de socket aan het IP-adres en de poort van de server.
+        // Maak socket aan en bind deze aan het IP-adres/poort die vanuit Setting.json komt.
         IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Parse(setting.ServerIPAddress!), setting.ServerPortNumber);
-
-        // Creëer een UDP-socket die gebruikmaakt van IPv4 (AddressFamily.InterNetwork), UDP (SocketType.Dgram) transportlaag en het UDP-protocol.
         Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-
-        // Bind de aangemaakte socket aan het opgegeven IP-adres en de poort zodat de server luisterend klaarstaat.
         serverSocket.Bind(serverEndpoint);
         Console.WriteLine($"Server listening on {serverEndpoint}");
 
-        // Maak een EndPoint-object aan dat wordt gebruikt om het IP-adres en de poort van de inkomende client-berichten te ontvangen.
         EndPoint clientEP = new IPEndPoint(IPAddress.Any, 0);
         byte[] buffer = new byte[4096];
 
-        inactivityTimer = new System.Timers.Timer(1000); // 1 second interval
-        inactivityTimer.Elapsed += (sender, e) =>
-        {
+        countdown = 10;
+        inactivityTimer = new System.Timers.Timer(1000);
+        inactivityTimer.Elapsed += (s, e) => {
             countdown--;
-            Console.WriteLine($"Time remaining: {countdown} seconds");
+            Console.WriteLine($"Countdown: {countdown}s");
             if (countdown <= 0)
             {
-                Message endMessage = new Message { MsgId = 9999, MsgType = MessageType.End, Content = "End due to inactivity" };
-                SendMessage(serverSocket, endMessage, clientEP);
+                Console.WriteLine("Timeout: No message received in 10 seconds. Sending End.");
+                Message timeoutMsg = new Message { MsgId = serverMsgIdCounter++, MsgType = MessageType.End, Content = "End due to inactivity" };
+                SendMessage(serverSocket, timeoutMsg, clientEP);
                 currentStep = ServerStep.AwaitHello;
-                Console.WriteLine("Inactivity timeout. Sent End message.");
                 inactivityTimer.Stop();
             }
         };
 
-        ResetTimer();
+        while (true)
+        {
+            // TODO:[Receive and print a received Message from the client]
+            // Ontvang bericht van client via UDP-socket
+            int receivedBytes = serverSocket.ReceiveFrom(buffer, ref clientEP);
+            string receivedJson = Encoding.UTF8.GetString(buffer, 0, receivedBytes);
+            Console.WriteLine($"Received: {receivedJson}");
+            ResetTimer();
 
-        // TODO:[Receive and print a received Message from the client]
+            Message? receivedMsg = JsonSerializer.Deserialize<Message>(receivedJson);
+            if (receivedMsg == null)
+            {
+                Console.WriteLine("Invalid message format");
+                continue;
+            }
 
+            switch (currentStep)
+            {
+                // TODO:[Receive and print Hello]
+                case ServerStep.AwaitHello:
+                    if (receivedMsg.MsgType == MessageType.Hello)
+                    {
+                        Console.WriteLine("Hello received from client.");
 
+                        // TODO:[Send Welcome to the client]
+                        Message welcome = new Message { MsgId = serverMsgIdCounter++, MsgType = MessageType.Welcome, Content = "Welcome from server" };
+                        SendMessage(serverSocket, welcome, clientEP);
+                        currentStep = ServerStep.AwaitLookup;
+                    }
+                    break;
 
+                // TODO:[Receive and print DNSLookup]
+                case ServerStep.AwaitLookup:
+                    if (receivedMsg.MsgType == MessageType.DNSLookup)
+                    {
+                        Console.WriteLine("DNSLookup received from client.");
 
-        // TODO:[Receive and print Hello]
+                        DNSRecord? requestedRecord = JsonSerializer.Deserialize<DNSRecord>(receivedMsg.Content!.ToString()!);
 
+                        if (requestedRecord == null || string.IsNullOrWhiteSpace(requestedRecord.Name) || string.IsNullOrWhiteSpace(requestedRecord.Type))
+                        {
+                            // TODO:[If not found Send Error]
+                            Message error = new Message { MsgId = serverMsgIdCounter++, MsgType = MessageType.Error, Content = "Incomplete DNSLookup" };
+                            SendMessage(serverSocket, error, clientEP);
+                            break;
+                        }
 
+                        // TODO:[Query the DNSRecord in Json file]
+                        var foundRecord = dNSRecords?.FirstOrDefault(r => r.Type == requestedRecord.Type && r.Name == requestedRecord.Name);
 
-        // TODO:[Send Welcome to the client]
+                        if (foundRecord != null)
+                        {
+                            // TODO:[If found Send DNSLookupReply containing the DNSRecord]
+                            Message reply = new Message { MsgId = receivedMsg.MsgId, MsgType = MessageType.DNSLookupReply, Content = foundRecord };
+                            SendMessage(serverSocket, reply, clientEP);
+                            currentStep = ServerStep.AwaitAck;
+                        }
+                        else
+                        {
+                            // TODO:[If not found Send Error]
+                            Message notFound = new Message { MsgId = serverMsgIdCounter++, MsgType = MessageType.Error, Content = "Domain not found" };
+                            SendMessage(serverSocket, notFound, clientEP);
+                        }
+                    }
+                    break;
 
-
-        // TODO:[Receive and print DNSLookup]
-
-
-        // TODO:[Query the DNSRecord in Json file]
-
-        // TODO:[If found Send DNSLookupReply containing the DNSRecord]
-
-
-
-        // TODO:[If not found Send Error]
-
-
-        // TODO:[Receive Ack about correct DNSLookupReply from the client]
-
-
-        // TODO:[If no further requests receieved send End to the client]
-
+                // TODO:[Receive Ack about correct DNSLookupReply from the client]
+                case ServerStep.AwaitAck:
+                    if (receivedMsg.MsgType == MessageType.Ack)
+                    {
+                        Console.WriteLine($"ACK received for MsgId {receivedMsg.Content}");
+                        currentStep = ServerStep.AwaitLookup; // Klaar om volgende opvraging te verwerken
+                    }
+                    break;
+            }
+        }
     }
-    
-    static void ResetTimer() // Zelf toegevoegd
+
+    static void SendMessage(Socket socket, Message message, EndPoint client)
+    {
+        string json = JsonSerializer.Serialize(message);
+        byte[] data = Encoding.UTF8.GetBytes(json);
+        socket.SendTo(data, client);
+        Console.WriteLine($"Sent: {json}");
+    }
+
+    static void ResetTimer()
     {
         countdown = 10;
         inactivityTimer.Stop();
         inactivityTimer.Start();
-        Console.WriteLine($"Timer reset to {countdown} seconds.");
+        Console.WriteLine($"Timer reset to 10 seconds");
     }
-
-
 }

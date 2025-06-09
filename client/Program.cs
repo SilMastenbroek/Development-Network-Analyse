@@ -37,77 +37,101 @@ class ClientUDP
 
     public static void start()
     {
+
         //TODO: [Create endpoints and socket]
-        IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Parse(setting.ServerIPAddress!), setting.ServerPortNumber);
+        // ✅ Maak de client- en server-endpoints aan op basis van instellingen uit Setting.json
+        IPEndPoint clientEndPoint = new IPEndPoint(IPAddress.Parse(setting.ClientIPAddress!), setting.ClientPortNumber);
+        IPEndPoint serverEndPoint = new IPEndPoint(IPAddress.Parse(setting.ServerIPAddress!), setting.ServerPortNumber);
+
+        // ✅ Maak een UDP-socket en bind deze aan het clientadres
         Socket clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        clientSocket.Bind(clientEndPoint);
+
+        Console.WriteLine($"🔌 Client socket created and bound to {clientEndPoint}");
+
 
         //TODO: [Create and send HELLO]
-        Message helloMessage = new Message { MsgId = 1, MsgType = MessageType.Hello, Content = "Hello from client" };
-        SendMessage(clientSocket, serverEndpoint, helloMessage);
+        // ✅ Maak Hello-bericht en stuur het naar de server
+        int msgId = 1;
+        Message hello = new Message { MsgId = msgId++, MsgType = MessageType.Hello, Content = "Hello from client" };
+        string helloJson = JsonSerializer.Serialize(hello);
+        byte[] helloBytes = Encoding.UTF8.GetBytes(helloJson);
+        clientSocket.SendTo(helloBytes, serverEndPoint);
+        Console.WriteLine($"📤 Sent Hello: {helloJson}");
 
         //TODO: [Receive and print Welcome from server]
-        ReceiveMessage(clientSocket);
+        // ✅ Wacht op Welcome-bericht van de server
+        byte[] buffer = new byte[4096];
+        EndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
+        int bytesReceived = clientSocket.ReceiveFrom(buffer, ref remoteEP);
+        string receivedJson = Encoding.UTF8.GetString(buffer, 0, bytesReceived);
+        Message? welcomeMsg = JsonSerializer.Deserialize<Message>(receivedJson);
+        Console.WriteLine($"📥 Received from server: {receivedJson}");
 
-        DNSRecord[] lookups = new DNSRecord[] {
-            new DNSRecord { Type = "A", Name = "www.outlook.com" },
-            new DNSRecord { Type = "MX", Name = "example.com" },
-            new DNSRecord { Type = "A", Name = "no-such-domain.com" },
-            new DNSRecord { Type = "A", Name = "bad_domain.com" }
+        if (welcomeMsg == null || welcomeMsg.MsgType != MessageType.Welcome)
+        {
+            Console.WriteLine("❌ Unexpected response from server. Exiting.");
+            return;
+        }
+
+        // TODO: [Create and send DNSLookup Message]
+        // ✅ Maak een lijst met testopvragingen (2 correct, 2 fout)
+        var lookups = new List<DNSRecord>
+        {
+            new DNSRecord { Type = "A", Name = "www.example.com" },
+            new DNSRecord { Type = "MX", Name = "mail.example.com" },
+            new DNSRecord { Type = "A", Name = "invalid" },
+            new DNSRecord { Type = "A", Name = "notfound.domain" }
         };
 
-        int msgIdCounter = 2;
 
-        foreach (var lookup in lookups)
+        //TODO: [Receive and print DNSLookupReply from server]
+        foreach (var record in lookups)
         {
-            Message lookupMessage = new Message { MsgId = msgIdCounter++, MsgType = MessageType.DNSLookup, Content = lookup };
-            SendMessage(clientSocket, serverEndpoint, lookupMessage);
+            Message lookupMsg = new Message { MsgId = msgId, MsgType = MessageType.DNSLookup, Content = record };
+            string lookupJson = JsonSerializer.Serialize(lookupMsg);
+            byte[] lookupBytes = Encoding.UTF8.GetBytes(lookupJson);
+            clientSocket.SendTo(lookupBytes, serverEndPoint);
+            Console.WriteLine($"📤 Sent DNSLookup (MsgId {msgId}): {lookupJson}");
 
-            var reply = ReceiveMessage(clientSocket);
+            // Wacht op reactie
+            buffer = new byte[4096];
+            remoteEP = new IPEndPoint(IPAddress.Any, 0);
+            bytesReceived = clientSocket.ReceiveFrom(buffer, ref remoteEP);
+            string replyJson = Encoding.UTF8.GetString(buffer, 0, bytesReceived);
+            Message? reply = JsonSerializer.Deserialize<Message>(replyJson);
+            Console.WriteLine($"📥 Received: {replyJson}");
 
-            if (reply.MsgType == MessageType.DNSLookupReply)
+
+            //TODO: [Send Acknowledgment to Server]
+            if (reply != null && reply.MsgType == MessageType.DNSLookupReply)
             {
-                //TODO: [Send Acknowledgment to Server]
-                Message ackMessage = new Message { MsgId = msgIdCounter++, MsgType = MessageType.Ack, Content = reply.MsgId };
-                SendMessage(clientSocket, serverEndpoint, ackMessage);
+                Message ack = new Message { MsgId = msgId++, MsgType = MessageType.Ack, Content = lookupMsg.MsgId };
+                string ackJson = JsonSerializer.Serialize(ack);
+                byte[] ackBytes = Encoding.UTF8.GetBytes(ackJson);
+                clientSocket.SendTo(ackBytes, serverEndPoint);
+                Console.WriteLine($"📤 Sent ACK for MsgId {lookupMsg.MsgId}");
+            }
+            else if (reply != null && reply.MsgType == MessageType.Error)
+            {
+                Console.WriteLine($"❌ Server responded with error: {reply.Content}");
             }
         }
 
-        // Wait for End Message
-        ReceiveMessage(clientSocket);
-
-        // TODO: [Create and send DNSLookup Message]
-        static void SendMessage(Socket socket, IPEndPoint endpoint, Message message)
-        {
-            string json = JsonSerializer.Serialize(message);
-            byte[] buffer = Encoding.UTF8.GetBytes(json);
-            socket.SendTo(buffer, endpoint);
-            Console.WriteLine($"Sent: {json}");
-        }
-
-        //TODO: [Receive and print DNSLookupReply from server]
-        static Message ReceiveMessage(Socket socket)
-        {
-            EndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
-            byte[] buffer = new byte[4096];
-            int received = socket.ReceiveFrom(buffer, ref remoteEP);
-            string json = Encoding.UTF8.GetString(buffer, 0, received);
-            Message? message = JsonSerializer.Deserialize<Message>(json);
-            Console.WriteLine($"Received: {json}");
-            return message;
-        }
-
-    
-    
-        
-
         // TODO: [Send next DNSLookup to server]
-        // repeat the process until all DNSLoopkups (correct and incorrect onces) are sent to server and the replies with DNSLookupReply
+        // ✅ Wordt automatisch verwerkt in de foreach-loop hierboven waarin we alle DNSRecord-verzoeken één voor één versturen
 
         //TODO: [Receive and print End from server]
-
-
-
-
+        // ✅ Wacht op End-bericht na laatste Ack
+        buffer = new byte[4096];
+        remoteEP = new IPEndPoint(IPAddress.Any, 0);
+        bytesReceived = clientSocket.ReceiveFrom(buffer, ref remoteEP);
+        string endJson = Encoding.UTF8.GetString(buffer, 0, bytesReceived);
+        Message? endMsg = JsonSerializer.Deserialize<Message>(endJson);
+        if (endMsg != null && endMsg.MsgType == MessageType.End)
+        {
+            Console.WriteLine("✅ Received End message from server. Session complete.");
+        }
 
     }
 }
