@@ -60,7 +60,8 @@ class ServerUDP
 
         countdown = 10;
         inactivityTimer = new System.Timers.Timer(1000);
-        inactivityTimer.Elapsed += (s, e) => {
+        inactivityTimer.Elapsed += (s, e) =>
+        {
             countdown--;
             Console.WriteLine($"Countdown: {countdown}s");
             if (countdown <= 0)
@@ -120,6 +121,13 @@ class ServerUDP
                             break;
                         }
 
+                        if (!IsValidDomain(requestedRecord.Name))
+                        {
+                            Message error = new Message { MsgId = serverMsgIdCounter++, MsgType = MessageType.Error, Content = "Invalid domain format" };
+                            SendMessage(serverSocket, error, clientEP);
+                            break;
+                        }
+
                         // TODO:[Query the DNSRecord in Json file]
                         var foundRecord = dNSRecords?.FirstOrDefault(r => r.Type == requestedRecord.Type && r.Name == requestedRecord.Name);
 
@@ -165,5 +173,12 @@ class ServerUDP
         inactivityTimer.Stop();
         inactivityTimer.Start();
         Console.WriteLine($"Timer reset to 10 seconds");
+    }
+    
+    static bool IsValidDomain(string domain)
+    {
+        // Regex: domeinnaam moet uit letters/cijfers bestaan, minimaal 1 punt bevatten, en geldig opgebouwd zijn
+        var regex = new System.Text.RegularExpressions.Regex(@"^(www\.)?[a-zA-Z0-9-]+\.[a-zA-Z]{2,}$");
+        return regex.IsMatch(domain);
     }
 }
