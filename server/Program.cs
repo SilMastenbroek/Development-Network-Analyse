@@ -131,7 +131,7 @@ class ServerUDP
                         {
                             // Ack ontvangen, sessie voor deze lookup is afgerond
                             HandleAck(message);
-                            SendEnd(client.Endpoint);
+                            // SendEnd(client.Endpoint);
                             // Server staat weer klaar voor nieuwe DNSLookup (zelfde sessie)
                             client.currentStep = ExpectedStep.Lookup;
                         }
