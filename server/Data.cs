@@ -1,14 +1,18 @@
 // NOTE: THIS FILE MUST NOT CHANGE
 
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 
-namespace MessageNS
+namespace LibData
 {
 
     public class Message
     {
         public int MsgId { get; set; }
         public MessageType MsgType { get; set; }
-        public string? Content { get; set; }
+        public Object? Content { get; set; }
+        
     }
 
     public enum MessageType
@@ -17,7 +21,6 @@ namespace MessageNS
         Welcome,
         DNSLookup,
         DNSLookupReply,
-        DNSRecord,
         Ack,
         End,
         Error
