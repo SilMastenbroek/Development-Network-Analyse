@@ -45,6 +45,9 @@ class ServerUDP
 
     // Houdt bij welke MsgId de server als laatst heeft gebruikt
     static int serverMsgIdCounter = 1;
+    static Message? lastSentReply = null;
+    static int retryCount = 0;
+
 
     public static void start()
     {
@@ -135,7 +138,9 @@ class ServerUDP
                         {
                             // TODO:[If found Send DNSLookupReply containing the DNSRecord]
                             Message reply = new Message { MsgId = receivedMsg.MsgId, MsgType = MessageType.DNSLookupReply, Content = foundRecord };
-                            SendMessage(serverSocket, reply, clientEP);
+                            lastSentReply = reply;
+                            retryCount = 0;
+                            SendMessage(serverSocket, lastSentReply, clientEP);
                             currentStep = ServerStep.AwaitAck;
                         }
                         else
@@ -152,7 +157,29 @@ class ServerUDP
                     if (receivedMsg.MsgType == MessageType.Ack)
                     {
                         Console.WriteLine($"ACK received for MsgId {receivedMsg.Content}");
-                        currentStep = ServerStep.AwaitLookup; // Klaar om volgende opvraging te verwerken
+                        retryCount = 0;
+                        lastSentReply = null;
+                        currentStep = ServerStep.AwaitLookup;
+                    }
+                    else
+                    {
+                        retryCount++;
+                        if (retryCount <= 3)
+                        {
+                            Console.WriteLine($"No ACK received. Retrying {retryCount}/3...");
+                            Thread.Sleep(2000); // wacht 2 seconden
+                            if (lastSentReply != null)
+                                SendMessage(serverSocket, lastSentReply, clientEP);
+                        }
+                        else
+                        {
+                            Console.WriteLine("Max retries reached. Returning to AwaitHello.");
+                            Message endMsg = new Message { MsgId = serverMsgIdCounter++, MsgType = MessageType.End, Content = "Max retries without Ack" };
+                            SendMessage(serverSocket, endMsg, clientEP);
+                            currentStep = ServerStep.AwaitHello;
+                            retryCount = 0;
+                            lastSentReply = null;
+                        }
                     }
                     break;
             }
