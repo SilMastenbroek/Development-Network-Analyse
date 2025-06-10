@@ -1,16 +1,10 @@
-﻿using System;
-using System.Data;
-using System.Data.SqlTypes;
-using System.Net;
-using System.Net.NetworkInformation;
+﻿using System.Net;
 using System.Net.Sockets;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
 using LibData;
 
-// ReceiveFrom();
 class Program
 {
     static void Main(string[] args)
@@ -19,20 +13,16 @@ class Program
     }
 }
 
-public class Setting
+public class Settings
 {
     public int ServerPortNumber { get; set; }
     public string? ServerIPAddress { get; set; }
-    public int ClientPortNumber { get; set; }
-    public string? ClientIPAddress { get; set; }
 }
 
 
 class ServerUDP
 {
-    static string configFile = @"../Setting.json";
-    static string configContent = File.ReadAllText(configFile);
-    static Setting? setting = JsonSerializer.Deserialize<Setting>(configContent);
+    static Settings? settings = JsonSerializer.Deserialize<Settings>(File.ReadAllText(@"settings.json"));
 
     // TODO: [Read the JSON file and return the list of DNSRecords]
     // Lees het DNS-recordbestand in (geformatteerd als JSON-array) dat gebruikt wordt voor DNS-queries.
@@ -53,7 +43,7 @@ class ServerUDP
     {
         // TODO: [Create a socket and endpoints and bind it to the server IP address and port number]
         // Maak socket aan en bind deze aan het IP-adres/poort die vanuit Setting.json komt.
-        IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Parse(setting.ServerIPAddress!), setting.ServerPortNumber);
+        IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Parse(settings.ServerIPAddress!), settings.ServerPortNumber);
         Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         serverSocket.Bind(serverEndpoint);
         Console.WriteLine($"Server listening on {serverEndpoint}");
