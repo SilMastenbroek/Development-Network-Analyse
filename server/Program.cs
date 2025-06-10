@@ -19,13 +19,9 @@ public class Settings
     public string? ServerIPAddress { get; set; }
 }
 
-
 class ServerUDP
 {
     static Settings? settings = JsonSerializer.Deserialize<Settings>(File.ReadAllText(@"settings.json"));
-
-    // TODO: [Read the JSON file and return the list of DNSRecords]
-    // Lees het DNS-recordbestand in (geformatteerd als JSON-array) dat gebruikt wordt voor DNS-queries.
     static DNSRecord[]? dNSRecords = JsonSerializer.Deserialize<DNSRecord[]>(File.ReadAllText(@"dns_records.json"));
 
     enum ServerStep { AwaitHello, AwaitLookup, AwaitAck }
@@ -33,16 +29,11 @@ class ServerUDP
     static System.Timers.Timer inactivityTimer;
     static int countdown;
 
-    // Houdt bij welke MsgId de server als laatst heeft gebruikt
-    static int serverMsgIdCounter = 1;
     static Message? lastSentReply = null;
     static int retryCount = 0;
 
-
     public static void start()
     {
-        // TODO: [Create a socket and endpoints and bind it to the server IP address and port number]
-        // Maak socket aan en bind deze aan het IP-adres/poort die vanuit Setting.json komt.
         IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Parse(settings.ServerIPAddress!), settings.ServerPortNumber);
         Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         serverSocket.Bind(serverEndpoint);
@@ -60,8 +51,19 @@ class ServerUDP
             if (countdown <= 0)
             {
                 Console.WriteLine("Timeout: No message received in 10 seconds. Sending End.");
-                Message timeoutMsg = new Message { MsgId = serverMsgIdCounter++, MsgType = MessageType.End, Content = "End due to inactivity" };
-                SendMessage(serverSocket, timeoutMsg, clientEP);
+                Message timeoutMsg = new Message { MsgId = 0, MsgType = MessageType.End, Content = "End due to inactivity" };
+                try
+                {
+                    SendMessage(serverSocket, timeoutMsg, clientEP);
+                }
+                catch (SocketException se)
+                {
+                    Console.WriteLine($"Failed to send timeout message: {se.Message}");
+                }
+                catch (ObjectDisposedException ode)
+                {
+                    Console.WriteLine($"Socket disposed: {ode.Message}");
+                }
                 currentStep = ServerStep.AwaitHello;
                 inactivityTimer.Stop();
             }
@@ -69,109 +71,132 @@ class ServerUDP
 
         while (true)
         {
-            // TODO:[Receive and print a received Message from the client]
-            // Ontvang bericht van client via UDP-socket
-            int receivedBytes = serverSocket.ReceiveFrom(buffer, ref clientEP);
-            string receivedJson = Encoding.UTF8.GetString(buffer, 0, receivedBytes);
-            Console.WriteLine($"Received: {receivedJson}");
-            ResetTimer();
-
-            Message? receivedMsg = JsonSerializer.Deserialize<Message>(receivedJson);
-            if (receivedMsg == null)
+            try
             {
-                Console.WriteLine("Invalid message format");
-                continue;
-            }
+                if (!serverSocket.Poll(1000000, SelectMode.SelectRead)) // 1 sec timeout
+                {
+                    continue;
+                }
 
-            switch (currentStep)
-            {
-                // TODO:[Receive and print Hello]
-                case ServerStep.AwaitHello:
-                    if (receivedMsg.MsgType == MessageType.Hello)
-                    {
-                        Console.WriteLine("Hello received from client.");
+                int receivedBytes = serverSocket.ReceiveFrom(buffer, ref clientEP);
+                string receivedJson = Encoding.UTF8.GetString(buffer, 0, receivedBytes);
+                Console.WriteLine($"Received: {receivedJson}");
+                ResetTimer();
 
-                        // TODO:[Send Welcome to the client]
-                        Message welcome = new Message { MsgId = serverMsgIdCounter++, MsgType = MessageType.Welcome, Content = "Welcome from server" };
-                        SendMessage(serverSocket, welcome, clientEP);
-                        currentStep = ServerStep.AwaitLookup;
-                    }
-                    break;
+                Message? receivedMsg = JsonSerializer.Deserialize<Message>(receivedJson);
+                if (receivedMsg == null)
+                {
+                    Console.WriteLine("Invalid message format");
+                    continue;
+                }
 
-                // TODO:[Receive and print DNSLookup]
-                case ServerStep.AwaitLookup:
-                    if (receivedMsg.MsgType == MessageType.DNSLookup)
-                    {
-                        Console.WriteLine("DNSLookup received from client.");
-
-                        DNSRecord? requestedRecord = JsonSerializer.Deserialize<DNSRecord>(receivedMsg.Content!.ToString()!);
-
-                        if (requestedRecord == null || string.IsNullOrWhiteSpace(requestedRecord.Name) || string.IsNullOrWhiteSpace(requestedRecord.Type))
+                switch (currentStep)
+                {
+                    case ServerStep.AwaitHello:
+                        if (receivedMsg.MsgType == MessageType.Hello)
                         {
-                            // TODO:[If not found Send Error]
-                            Message error = new Message { MsgId = serverMsgIdCounter++, MsgType = MessageType.Error, Content = "Incomplete DNSLookup" };
-                            SendMessage(serverSocket, error, clientEP);
-                            break;
+                            Console.WriteLine("Hello received from client.");
+                            Message welcome = new Message { MsgId = receivedMsg.MsgId, MsgType = MessageType.Welcome, Content = "Welcome from server" };
+                            SendMessage(serverSocket, welcome, clientEP);
+                            currentStep = ServerStep.AwaitLookup;
                         }
+                        break;
 
-                        if (!IsValidDomain(requestedRecord.Name))
+                    case ServerStep.AwaitLookup:
+                        if (receivedMsg.MsgType == MessageType.DNSLookup)
                         {
-                            Message error = new Message { MsgId = serverMsgIdCounter++, MsgType = MessageType.Error, Content = "Invalid domain format" };
-                            SendMessage(serverSocket, error, clientEP);
-                            break;
-                        }
+                            Console.WriteLine("DNSLookup received from client.");
+                            DNSRecord? requestedRecord = JsonSerializer.Deserialize<DNSRecord>(receivedMsg.Content!.ToString()!);
 
-                        // TODO:[Query the DNSRecord in Json file]
-                        var foundRecord = dNSRecords?.FirstOrDefault(r => r.Type == requestedRecord.Type && r.Name == requestedRecord.Name);
+                            if (requestedRecord == null || string.IsNullOrWhiteSpace(requestedRecord.Name) || string.IsNullOrWhiteSpace(requestedRecord.Type))
+                            {
+                                Message error = new Message { MsgId = receivedMsg.MsgId, MsgType = MessageType.Error, Content = "Incomplete DNSLookup" };
+                                SendMessage(serverSocket, error, clientEP);
+                                break;
+                            }
 
-                        if (foundRecord != null)
-                        {
-                            // TODO:[If found Send DNSLookupReply containing the DNSRecord]
-                            Message reply = new Message { MsgId = receivedMsg.MsgId, MsgType = MessageType.DNSLookupReply, Content = foundRecord };
-                            lastSentReply = reply;
-                            retryCount = 0;
-                            SendMessage(serverSocket, lastSentReply, clientEP);
-                            currentStep = ServerStep.AwaitAck;
-                        }
-                        else
-                        {
-                            // TODO:[If not found Send Error]
-                            Message notFound = new Message { MsgId = serverMsgIdCounter++, MsgType = MessageType.Error, Content = "Domain not found" };
-                            SendMessage(serverSocket, notFound, clientEP);
-                        }
-                    }
-                    break;
+                            if (!IsValidDomain(requestedRecord.Name))
+                            {
+                                Message error = new Message { MsgId = receivedMsg.MsgId, MsgType = MessageType.Error, Content = "Invalid domain format" };
+                                SendMessage(serverSocket, error, clientEP);
+                                break;
+                            }
 
-                // TODO:[Receive Ack about correct DNSLookupReply from the client]
-                case ServerStep.AwaitAck:
-                    if (receivedMsg.MsgType == MessageType.Ack)
-                    {
-                        Console.WriteLine($"ACK received for MsgId {receivedMsg.Content}");
-                        retryCount = 0;
-                        lastSentReply = null;
-                        currentStep = ServerStep.AwaitLookup;
-                    }
-                    else
-                    {
-                        retryCount++;
-                        if (retryCount <= 3)
-                        {
-                            Console.WriteLine($"No ACK received. Retrying {retryCount}/3...");
-                            Thread.Sleep(2000); // wacht 2 seconden
-                            if (lastSentReply != null)
+                            var foundRecord = dNSRecords?.FirstOrDefault(r =>
+                                r.Type == requestedRecord.Type &&
+                                (NormalizeDomain(r.Name) == NormalizeDomain(requestedRecord.Name))
+                            );
+
+                            static string NormalizeDomain(string domain)
+                            {
+                                if (domain.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
+                                    return domain.Substring(4);
+                                return domain;
+                            }
+
+                            if (foundRecord != null)
+                            {
+                                Message reply = new Message { MsgId = receivedMsg.MsgId, MsgType = MessageType.DNSLookupReply, Content = foundRecord };
+                                lastSentReply = reply;
+                                retryCount = 0;
                                 SendMessage(serverSocket, lastSentReply, clientEP);
+                                currentStep = ServerStep.AwaitAck;
+                            }
+                            else
+                            {
+                                Message notFound = new Message { MsgId = receivedMsg.MsgId, MsgType = MessageType.Error, Content = "Domain not found" };
+                                SendMessage(serverSocket, notFound, clientEP);
+                            }
                         }
-                        else
+                        break;
+
+                    case ServerStep.AwaitAck:
+                        if (receivedMsg.MsgType == MessageType.Ack)
                         {
-                            Console.WriteLine("Max retries reached. Returning to AwaitHello.");
-                            Message endMsg = new Message { MsgId = serverMsgIdCounter++, MsgType = MessageType.End, Content = "Max retries without Ack" };
-                            SendMessage(serverSocket, endMsg, clientEP);
-                            currentStep = ServerStep.AwaitHello;
+                            Console.WriteLine($"ACK received for MsgId {receivedMsg.Content}");
                             retryCount = 0;
                             lastSentReply = null;
+                            currentStep = ServerStep.AwaitLookup;
                         }
-                    }
-                    break;
+                        else
+                        {
+                            retryCount++;
+                            if (retryCount <= 3)
+                            {
+                                Console.WriteLine($"No ACK received. Retrying {retryCount}/3...");
+                                Thread.Sleep(2000);
+                                if (lastSentReply != null)
+                                    SendMessage(serverSocket, lastSentReply, clientEP);
+                            }
+                            else
+                            {
+                                Console.WriteLine("Max retries reached. Returning to AwaitHello.");
+                                Message endMsg = new Message { MsgId = receivedMsg.MsgId, MsgType = MessageType.End, Content = "Max retries without Ack" };
+                                SendMessage(serverSocket, endMsg, clientEP);
+                                currentStep = ServerStep.AwaitHello;
+                                retryCount = 0;
+                                lastSentReply = null;
+                            }
+                        }
+                        break;
+                }
+            }
+            catch (SocketException ex)
+            {
+                Console.WriteLine($"Socket exception occurred: {ex.Message}");
+                currentStep = ServerStep.AwaitHello;
+                inactivityTimer.Stop();
+            }
+            catch (ObjectDisposedException ex)
+            {
+                Console.WriteLine($"Socket has been disposed: {ex.Message}");
+                break;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Unexpected exception: {ex.Message}");
+                currentStep = ServerStep.AwaitHello;
+                inactivityTimer.Stop();
             }
         }
     }
@@ -191,11 +216,10 @@ class ServerUDP
         inactivityTimer.Start();
         Console.WriteLine($"Timer reset to 10 seconds");
     }
-    
+
     static bool IsValidDomain(string domain)
     {
-        // Regex: domeinnaam moet uit letters/cijfers bestaan, minimaal 1 punt bevatten, en geldig opgebouwd zijn
-        var regex = new System.Text.RegularExpressions.Regex(@"^(www\.)?[a-zA-Z0-9-]+\.[a-zA-Z]{2,}$");
+        var regex = new System.Text.RegularExpressions.Regex(@"^(www\.)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$");
         return regex.IsMatch(domain);
     }
 }
