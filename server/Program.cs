@@ -124,7 +124,7 @@ class ServerUDP
 
                             var foundRecord = dNSRecords?.FirstOrDefault(r =>
                                 r.Type == requestedRecord.Type &&
-                                (NormalizeDomain(r.Name) == NormalizeDomain(requestedRecord.Name))
+                                (NormalizeDomain(r.Name).Equals(NormalizeDomain(requestedRecord.Name), StringComparison.OrdinalIgnoreCase))
                             );
 
                             static string NormalizeDomain(string domain)

@@ -38,7 +38,7 @@
   },
   {
     "Type": "MX",
-    "Name": "example.com",
+    "Name": "examplegood.com",
     "Value": "mail.example.com",
     "Priority": 10,
     "TTL": 3600
@@ -47,6 +47,12 @@
     "Type": "A",
     "Name": "mail.example.com",
     "Value": "192.168.2.1",
+    "TTL": 3600
+  },
+  {
+    "Type": "A",
+    "Name": "mail.testdomain.com",
+    "Value": "192.168.1.60",
     "TTL": 3600
   }
 ]
