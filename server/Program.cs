@@ -29,6 +29,7 @@ class ServerUDP
 
     static System.Timers.Timer inactivityTimer;
     static int countdown;
+    static int timeoutDuration = 30;
 
     static Message? lastSentReply = null;
     static int retryCount = 0;
@@ -44,7 +45,7 @@ class ServerUDP
         EndPoint clientEP = new IPEndPoint(IPAddress.Any, 0);
         byte[] buffer = new byte[4096];
 
-        countdown = 10;
+        countdown = timeoutDuration;
         inactivityTimer = new System.Timers.Timer(1000);
         inactivityTimer.Elapsed += (s, e) =>
         {
@@ -225,7 +226,7 @@ class ServerUDP
 
     static void ResetTimer()
     {
-        countdown = 30;
+        countdown = timeoutDuration;
         inactivityTimer.Stop();
         inactivityTimer.Start();
         Console.WriteLine("Timer reset to 10 seconds");
