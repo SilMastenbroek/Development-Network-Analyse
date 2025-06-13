@@ -19,7 +19,7 @@
   },
   {
     "Type": "A",
-    "Name": "www.mywebsite.com", 
+    "Name": "www.mywebsite.com",
     "Value": "192.168.1.40",
     "TTL": 3600
   },
@@ -37,7 +37,7 @@
     "TTL": 3600
   },
   {
-    "Type": "MX",
+    "Type": "A",
     "Name": "examplegood.com",
     "Value": "mail.example.com",
     "Priority": 10,
@@ -50,8 +50,15 @@
     "TTL": 3600
   },
   {
+    "Type": "MX",
+    "Name": "mail.example.com",
+    "Value": "mail.example.com",
+    "Priority": 10,
+    "TTL": 3600
+  },
+  {
     "Type": "A",
-    "Name": "mail.testdomain.com",
+    "Name": "www.example.com",
     "Value": "192.168.1.60",
     "TTL": 3600
   }

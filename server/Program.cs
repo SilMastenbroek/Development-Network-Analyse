@@ -8,6 +8,7 @@ class Program
 {
     static void Main(string[] args)
     {
+        // TODO: [Start the server]
         ServerUDP.start();
     }
 }
@@ -20,19 +21,21 @@ public class Settings
 
 class ServerUDP
 {
-    //TODO: [Read the JSON file and return the list of DNSRecords]
+    // TODO: [Read the JSON file and return the list of DNSRecords]
     static Settings? settings = JsonSerializer.Deserialize<Settings>(File.ReadAllText("settings.json"));
     static DNSRecord[]? dNSRecords = JsonSerializer.Deserialize<DNSRecord[]>(File.ReadAllText("dns_records.json"));
 
     enum ServerStep { AwaitHello, AwaitLookup, AwaitAck }
     static ServerStep currentStep = ServerStep.AwaitHello;
 
+    // TODO: [Define inactivity timer and tracking variables]
     static System.Timers.Timer inactivityTimer;
     static int countdown;
-    static int timeoutDuration = 30;
+    static int timeoutDuration = 10;
 
     static Message? lastSentReply = null;
     static int retryCount = 0;
+    static bool expectingAck = false;
 
     public static void start()
     {
@@ -45,6 +48,7 @@ class ServerUDP
         EndPoint clientEP = new IPEndPoint(IPAddress.Any, 0);
         byte[] buffer = new byte[4096];
 
+        // TODO: [Initialize inactivity timer logic for ACK timeout and END control]
         countdown = timeoutDuration;
         inactivityTimer = new System.Timers.Timer(1000);
         inactivityTimer.Elapsed += (s, e) =>
@@ -53,22 +57,38 @@ class ServerUDP
             Console.WriteLine($"Countdown: {countdown}s");
             if (countdown <= 0)
             {
-                Console.WriteLine("Timeout: No message received in 10 seconds. Sending End.");
-                Message timeoutMsg = new Message { MsgId = 0, MsgType = MessageType.End, Content = "End due to inactivity" };
-                try
-                {
-                    SendMessage(serverSocket, timeoutMsg, clientEP);
-                }
-                catch (SocketException se)
-                {
-                    Console.WriteLine($"Failed to send timeout message: {se.Message}");
-                }
-                catch (ObjectDisposedException ode)
-                {
-                    Console.WriteLine($"Socket disposed: {ode.Message}");
-                }
-                currentStep = ServerStep.AwaitHello;
                 inactivityTimer.Stop();
+
+                if (expectingAck && lastSentReply != null && retryCount < 3)
+                {
+                    retryCount++;
+                    Console.WriteLine($"Timeout: retry {retryCount}/3");
+                    SendMessage(serverSocket, lastSentReply, clientEP);
+                    countdown = timeoutDuration;
+                    inactivityTimer.Start();
+                }
+                else
+                {
+                    Console.WriteLine("Timeout: Ending session.");
+                    // TODO: [Send End message if no ACK is received after retries or no more activity]
+                    Message timeoutMsg = new Message { MsgId = 0, MsgType = MessageType.End, Content = "End due to inactivity or failed ACK retries" };
+                    try
+                    {
+                        SendMessage(serverSocket, timeoutMsg, clientEP);
+                    }
+                    catch (SocketException se)
+                    {
+                        Console.WriteLine($"Failed to send timeout message: {se.Message}");
+                    }
+                    catch (ObjectDisposedException ode)
+                    {
+                        Console.WriteLine($"Socket disposed: {ode.Message}");
+                    }
+                    currentStep = ServerStep.AwaitHello;
+                    retryCount = 0;
+                    lastSentReply = null;
+                    expectingAck = false;
+                }
             }
         };
 
@@ -76,17 +96,18 @@ class ServerUDP
         {
             try
             {
+                // TODO: [Receive and print a received Message from the client]
                 if (!serverSocket.Poll(1000000, SelectMode.SelectRead))
                 {
                     continue;
                 }
 
-                // TODO:[Receive and print a received Message from the client]
                 int receivedBytes = serverSocket.ReceiveFrom(buffer, ref clientEP);
                 string receivedJson = Encoding.UTF8.GetString(buffer, 0, receivedBytes);
 
                 try
                 {
+                    // TODO: [Try to preview the incoming message content for logging]
                     Message? preview = JsonSerializer.Deserialize<Message>(receivedJson);
                     Console.WriteLine($"📥 Received: MsgId={preview?.MsgId}, MsgType={preview?.MsgType}, Content={preview?.Content}");
                     ResetTimer();
@@ -107,11 +128,11 @@ class ServerUDP
                 switch (currentStep)
                 {
                     case ServerStep.AwaitHello:
-                        // TODO:[Receive and print Hello]
+                        // TODO: [Receive and print Hello]
                         if (receivedMsg.MsgType == MessageType.Hello)
                         {
                             Console.WriteLine("Hello received from client.");
-                            // TODO:[Send Welcome to the client]
+                            // TODO: [Send Welcome to the client]
                             Message welcome = new Message { MsgId = receivedMsg.MsgId, MsgType = MessageType.Welcome, Content = "Welcome from server" };
                             SendMessage(serverSocket, welcome, clientEP);
                             currentStep = ServerStep.AwaitLookup;
@@ -119,7 +140,7 @@ class ServerUDP
                         break;
 
                     case ServerStep.AwaitLookup:
-                        // TODO:[Receive and print DNSLookup]
+                        // TODO: [Receive and print DNSLookup]
                         if (receivedMsg.MsgType == MessageType.DNSLookup)
                         {
                             Console.WriteLine("DNSLookup received from client.");
@@ -127,6 +148,7 @@ class ServerUDP
 
                             if (requestedRecord == null || string.IsNullOrWhiteSpace(requestedRecord.Name) || string.IsNullOrWhiteSpace(requestedRecord.Type))
                             {
+                                // TODO: [If not found or invalid Send Error]
                                 Message error = new Message { MsgId = receivedMsg.MsgId, MsgType = MessageType.Error, Content = "Incomplete DNSLookup" };
                                 SendMessage(serverSocket, error, clientEP);
                                 break;
@@ -139,24 +161,23 @@ class ServerUDP
                                 break;
                             }
 
-                            // TODO:[Query the DNSRecord in Json file]
                             var foundRecord = dNSRecords?.FirstOrDefault(r =>
-                                r.Type == requestedRecord.Type &&
+                                r.Type.Equals(requestedRecord.Type, StringComparison.OrdinalIgnoreCase) &&
                                 (NormalizeDomain(r.Name).Equals(NormalizeDomain(requestedRecord.Name), StringComparison.OrdinalIgnoreCase))
                             );
 
                             if (foundRecord != null)
                             {
-                                // TODO:[If found Send DNSLookupReply containing the DNSRecord]
+                                // TODO: [If found Send DNSLookupReply containing the DNSRecord]
                                 Message reply = new Message { MsgId = receivedMsg.MsgId, MsgType = MessageType.DNSLookupReply, Content = foundRecord };
                                 lastSentReply = reply;
                                 retryCount = 0;
+                                expectingAck = true;
                                 SendMessage(serverSocket, lastSentReply, clientEP);
                                 currentStep = ServerStep.AwaitAck;
                             }
                             else
                             {
-                                // TODO:[If not found Send Error]
                                 Message notFound = new Message { MsgId = receivedMsg.MsgId, MsgType = MessageType.Error, Content = "Domain not found" };
                                 SendMessage(serverSocket, notFound, clientEP);
                             }
@@ -164,34 +185,14 @@ class ServerUDP
                         break;
 
                     case ServerStep.AwaitAck:
-                        // TODO:[Receive Ack about correct DNSLookupReply from the client]
+                        // TODO: [Receive Ack about correct DNSLookupReply from the client]
                         if (receivedMsg.MsgType == MessageType.Ack)
                         {
                             Console.WriteLine($"ACK received for MsgId {receivedMsg.Content}");
                             retryCount = 0;
                             lastSentReply = null;
+                            expectingAck = false;
                             currentStep = ServerStep.AwaitLookup;
-                        }
-                        else
-                        {
-                            retryCount++;
-                            if (retryCount <= 3)
-                            {
-                                Console.WriteLine($"No ACK received. Retrying {retryCount}/3...");
-                                Thread.Sleep(2000);
-                                if (lastSentReply != null)
-                                    SendMessage(serverSocket, lastSentReply, clientEP);
-                            }
-                            else
-                            {
-                                Console.WriteLine("Max retries reached. Returning to AwaitHello.");
-                                // TODO:[If no further requests receieved send End to the client]
-                                Message endMsg = new Message { MsgId = receivedMsg.MsgId, MsgType = MessageType.End, Content = "Max retries without Ack" };
-                                SendMessage(serverSocket, endMsg, clientEP);
-                                currentStep = ServerStep.AwaitHello;
-                                retryCount = 0;
-                                lastSentReply = null;
-                            }
                         }
                         break;
                 }
